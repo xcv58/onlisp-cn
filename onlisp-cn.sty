@@ -39,21 +39,23 @@
 % not ready to use XeIndex
 %\usepackage{xeindex}
 
-\setmainfont[Mapping=tex-text]{Minion Pro}
-\setromanfont[Mapping=tex-text]{Minion Pro} % Minion
-\setsansfont[Mapping=tex-text]{Myriad Pro} % Myriad
+% \setmainfont[Mapping=tex-text]{Minion Pro}
+% \setromanfont[Mapping=tex-text]{Minion Pro} % Minion
+\setmainfont[Mapping=tex-text]{Noto Sans S Chinese Light}
+\setromanfont[Mapping=tex-text]{Noto Sans S Chinese Light} % Minion
+\setsansfont[Mapping=tex-text]{Noto Sans S Chinese} % Myriad
 \setmonofont{Menlo}
 \defaultfontfeatures{Scale=MatchLowercase}
 \setCJKmainfont[Ligatures={Rare},
-                BoldFont={Adobe Heiti Std},
-                ItalicFont={Adobe Kaiti Std}]{Adobe Song Std}
-\setCJKsansfont[Ligatures={Rare}]{Adobe Heiti Std}
-\setCJKmonofont{Adobe Kaiti Std}
-\setCJKfamilyfont{kai}{Adobe Kaiti Std}
+                BoldFont={Kaiti SC},
+                ItalicFont={Kaiti SC}]{Kaiti SC}
+\setCJKsansfont[Ligatures={Rare}]{Heiti SC}
+\setCJKmonofont{Kaiti SC}
+\setCJKfamilyfont{kai}{Kaiti SC}
 \punctstyle{mixedwidth}
 \renewcommand{\emph}[1]{{\em\large #1}} 
-\newfontfamily\hei[Scale=1.02]{Adobe Heiti Std}
-\renewcommand{\textsc}[1]{{\fontspec{Minion Pro}\scshape #1}}
+\newfontfamily\hei[Scale=1.02]{Heiti SC}
+\renewcommand{\textsc}[1]{{\fontspec{Noto Sans S Chinese Light}\scshape #1}}
 
 \let\frenchtext\relax
 \newfontinstance\frfont{Lucida Grande}
