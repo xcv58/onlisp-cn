@@ -1,0 +1,713 @@
+%!TEX encoding = UTF-8 Unicode
+% $Id: 12-generalized_variables.tex 18 2014-03-12 22:35:24Z binghe $
+
+\chapter{\gv{}}
+\label{chap:generalized_variables}
+\index{generalized variables \gv{}}
+
+第~\ref{chap:when_to_use_macros} 章曾提到，宏的长处之一是其变换参数的能力。\verb|setf|\index{setf@\texttt{setf}} 就是
+这类宏中的一员。本章将着重分析~\verb|setf| 的内涵，然后以几个宏为例，它们
+将建立在~\verb|setf| 的基础之上。
+
+要在~\verb|setf| 上编写正确无误的宏并非易事，其难度让人咋舌。为了介绍这个主题，第一节会先给出一个有点
+小问题的简单例子。接下来的小节将解释该宏的错误之处，然后展示如何改正它。第三和第四节会介绍一些基于
+~\verb|setf| 的\utility{}的例子，而最后一节则会说明如何定义你自己的~\verb|setf|
+\inversion。
+
+\section{概念}
+\label{sec:gv:the_concept}
+
+内置宏~\verb|setf| 是~\verb|setq| 的推广形式。\verb|setf| 的第一个参数可以
+是个函数调用而非简单的变量：
+\begin{lstlisting}
+> (setq lst '(a b c))
+(A B C)
+> (setf (car lst) 480)
+480
+> lst
+(480 B C)
+\end{lstlisting}
+
+一般而言，\texttt{(setf $x$ $y$)} 可以理解成~``务必让~$x$ 的求值结果为~$y$''。
+作为一个宏，\verb|setf| 得以深入到参数内部，弄清需要做哪些工作，才能满足这个要求。
+如果第一个参数~(在宏展开以后) 是个符号，那么~\verb|setf| 就只会展开成
+~\verb|setq|。但如果第一个参数是个查询语句，那么~\verb|setf| 则会展开到对应的断言上。
+由于第二个参数是常量，所以前面的例子可以展开成：
+\begin{lstlisting}
+(progn (rplaca lst 480) 480)
+\end{lstlisting}
+\index{rplaca@\texttt{rplaca}}
+这种从查询到断言的变换被称为\emph{\inversion}。Common Lisp 中所有最常用的访问函数都有
+预定义的\inversion，包括~\verb|car|、\verb|cdr|、\verb|nth|、
+\verb|aref|、\verb|get|、\verb|gethash|，以及那些由~\verb|defstruct| 创建的访问函数。(
+完整的名单见~\textsc{cltl}2 的第~125 页。)
+
+能充当~\verb|setf| 第一个参数的表达式被称为\emph{\gv{}}。\gv{}已经成为了一种强有力的
+抽象机制。宏调用和\gv{}的相似之处在于：一个宏调用，只要能展开成可逆引用，那么其本身就一定是可逆的\index{macros 宏!calls invertible 可逆调用}。
+
+当我们也加入这个行列，基于~\verb|setf| 编写自己的宏时，这种组合可以产生显而易见更清爽的程序。
+我们可以在~\verb|setf| 上面定义的宏有很多，其中一个是~\verb|toggle|\footnote{这个定义是
+错误的，下一节将给出解释。}，
+\begin{lstlisting}
+(defmacro toggle (obj)
+  `(setf ,obj (not ,obj)))
+\end{lstlisting}
+它可以反转一个\gv{}的值：
+\begin{lstlisting}
+> (let ((lst '(a b c)))
+    (toggle (car lst))
+    lst)
+(NIL B C)
+\end{lstlisting}
+
+现在考虑下面的应用。假设有个人，他可能是个肥皂剧作者、精力充沛的好事者，或是居委会大妈，
+想要维护一个数据库。其中记录着小镇上所有居民之间的种种恩怨情仇。在数据库里的表里，
+其中有一张便是用来保存朋友关系的：
+\begin{lstlisting}
+(defvar *friends* (make-hash-table))
+\end{lstlisting}
+这个哈希表的表项本身也是哈希表，其中，潜在的朋友被映射到~\texttt{t} 或者~\texttt{nil}：
+\begin{lstlisting}
+(setf (gethash 'mary *friends*) (make-hash-table))
+\end{lstlisting}
+为了使~John 成为~Mary 的朋友，我们可以说：
+\begin{lstlisting}
+(setf (gethash 'john (gethash 'mary *friends*)) t)
+\end{lstlisting}
+
+这个镇被分为两派\index{factions 派系}。正如帮派的传统，每个人都声称~``凡人非友即敌''，所以镇上
+所有人都被迫加入一方或者另一方。这样当某人转变立场时，他所有的朋友都变成敌人，而所有的敌人则
+变成朋友。
+
+如果只用内置的操作符来切换~\verb|x| 和~\verb|y| 的敌友关系，我们必须这样说：
+\begin{lstlisting}
+(setf (gethash x (gethash y *friends*))
+      (not (gethash x (gethash y *friends*))))
+\end{lstlisting}
+尽管去掉~\verb|setf| 后要简单许多，这个表达式还是相当复杂。倘若我们为数据库定义了
+一个访问宏\index{macros 宏!access}，如下：
+\begin{lstlisting}
+(defmacro friend-of (p q)
+  `(gethash ,p (gethash ,q *friends*)))
+\end{lstlisting}
+那么在这个宏和~\verb|toggle| 的协助下，我们就得以更方便地修改数据库的数据。
+前面那个更新数据库的语句可以简化成：
+\begin{lstlisting}
+(toggle (friend-of x y))
+\end{lstlisting}
+
+\gv{}就像是美味的健康食品。它们能让你的程序良好地模块化\index{modularity 模块化}，同时变得更为优雅。
+如果你给出宏或者可逆函数，用来访问你的数据结构，那么其他模块就可以使用~\verb|setf| 来修改你的数据结构而无需
+了解其内部细节。
+
+\section{多重求值问题}
+\label{sec:the_multiple_evaluation_problem}
+
+上一节曾警告说，我们最初的~\verb|toggle| 定义是不正确的：
+\begin{lstlisting}[escapechar=\@]
+(defmacro toggle (obj)                  @\hfill@; wrong
+  `(setf ,obj (not ,obj)))
+\end{lstlisting}
+它会碰到第~\ref{sec:number_of_evaluations} 节里提到的多重求值问题。如果它的
+参数有副作用，那麻烦就来了。比如说，若~\verb|lst| 是一个对象列表，我们这样写：
+\begin{lstlisting}
+(toggle (nth (incf i) lst))
+\end{lstlisting}
+\index{incf@\texttt{incf}}
+并期待它能反转第~\verb|(i+1)| 个元素。事与愿违，如果使用~\verb|toggle| 现在的定义，
+这个调用将展开成：
+\begin{lstlisting}
+(setf (nth (incf i) lst)
+      (not (nth (incf i) lst)))
+\end{lstlisting}
+这会使~\verb|i| 递增两次，并且将第~\verb|(i+1)| 个元素设置成第~\verb|(i+2)|
+个元素的反。所以在本例中
+\begin{lstlisting}
+> (let ((lst '(t nil t))
+        (i -1))
+    (toggle (nth (incf i) lst))
+    lst)
+(T NIL T)
+\end{lstlisting}
+调用~\verb|toggle| 毫无效果。
+
+仅仅把作为~\verb|toggle| 参数给出的表达式插入到~\verb|setf| 的第一个参数的位置上
+还不够。我们必须深入到表达式内部，看看它到底做了什么：如果它含有~subform，而且这些~subform 有副作用的话，
+我们就需要把它们分开，并单独求值。一般而言，这件事情并不那么简单。
+
+为了让问题容易些，Common Lisp 提供了一个宏，它可以帮助我们自动定义一些基于~\verb|setf| 的宏，不过适用范围有限。宏的
+名字叫~\verb|define-modify-macro|\index{define-modify-macro@\texttt{define-modify-macro}}，它接受三个参数：被定义宏的宏名，它的附加参数（出现在\gv{}之后），以及一个函数名，这个函数将为\gv{}产生新值。
+\footnote{一般意义上的函数名：\texttt{1+} 或者~\texttt{(lambda (x) (+ x 1))} 都可以。}\footnote{译者注：现行~Common Lisp 标准~(\textsc{CLHS}) 事实上要求~\texttt{define-modify-macro} 和~\texttt{define-compiler-macro} 的第三个参数的类型必须是符号。}
+
+使用~\verb|define-modify-macro|，我们可以像下面这样定义~\verb|toggle|：
+\begin{lstlisting}
+(define-modify-macro toggle () not)
+\end{lstlisting}
+具体说，就是~``若要求值形如~\texttt{(toggle \emph{place})} 的表达式，
+应该先找到~\emph{place} 指定的位置，并且，如果保存在那里的值是~\emph{val}，将其替换成
+~\texttt{(not \emph{val})} 的值''。下面把这个新宏用在原来的例子里：
+\begin{lstlisting}
+> (let ((lst '(t nil t))
+        (i -1))
+    (toggle (nth (incf i) lst))
+    lst)
+(NIL NIL T)
+\end{lstlisting}
+
+虽然这个版本正确无误地给出了结果，但它本可以写得更通用些。由于~\verb|setf| 和~\verb|setq| 两者
+对其参数数量都没有限制，\verb|toggle| 也应如此。我们可以通过在修改宏~(modify-macro)
+的基础上定义另一个宏，来赋予它这种能力，如图~\ref{fig:macros_which_operate_on_generalized_variables} 所示。
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro allf (val &rest args)
+  (with-gensyms (gval)
+    `(let ((,gval ,val))
+       (setf ,@(mapcan #'(lambda (a) (list a gval))
+                       args)))))
+
+(defmacro nilf (&rest args) `(allf nil ,@args))
+
+(defmacro tf (&rest args) `(allf t ,@args))
+
+(defmacro toggle (&rest args)
+  `(progn
+     ,@(mapcar #'(lambda (a) `(toggle2 ,a))
+               args)))
+
+(define-modify-macro toggle2 () not)
+\end{lstlisting}
+\index{allf@\texttt{allf}}
+\index{nilf@\texttt{nilf}}
+\index{tf@\texttt{tf}}
+\index{toggle@\texttt{toggle}}
+  \caption{操作在\gv{}上的宏}
+  \label{fig:macros_which_operate_on_generalized_variables}
+\end{figure}
+
+\section{新的\utility{}}
+\label{sec:new_utilities}
+
+本节将给出一些新的\utility{}为例，我们用它们对\gv{}进行操作。这些\utility{}必须是宏，
+以便将参数原封不动地传给~\verb|setf|。
+
+图~\ref{fig:macros_which_operate_on_generalized_variables} 中有四个基于
+~\verb|setf| 的新宏。第一个是~\verb|allf|，它被用来将同一值赋给多个\gv{}。
+\verb|nilf| 和~\verb|tf| 就是基于它实现的，它们分别将参数设置为~\verb|nil|
+和~\verb|t|。虽然这些宏很简单，但是方便实用。
+
+和~\verb|setq| 一样，\verb|setf| 也可以接受多个参数\pozhehao{}即交替出现的变量和对应的值：
+\begin{lstlisting}
+(setf x 1 y 2)
+\end{lstlisting}
+这些新的\utility{}同样有这个能力，而且只用传原来一半的参数就可以了。如果你想要把多个变量初始化为
+~\verb|nil|，那么可以不再使用
+\begin{lstlisting}
+(setf x nil y nil z nil)
+\end{lstlisting}
+而改成说
+\begin{lstlisting}
+(nilf x y z)
+\end{lstlisting}
+就行了。最后一个宏是前一节曾介绍过的~\verb|toggle|：它和~\verb|nilf| 差不多，但
+给每个参数设置的是真值的反。
+
+这四个宏说明了关于赋值操作符的一个要点\index{assignment 赋值!macros for}。就算我们只需要对普通变量使用一个操作符，
+而把这个操作符号展开成~\verb|setf| 而非~\verb|setq|，这样做，有百利而无一害。如果第一个参数是符号，
+\verb|setf| 将直接展开到~\verb|setq|。由于不费吹灰之力，就能拥有
+~\verb|setf| 的一般性，所以很少有必要在展开式里使用~\verb|setq|\index{setq@\texttt{setq}!now redundant}。
+
+\begin{figure}
+\begin{lstlisting}
+(define-modify-macro concf (obj) nconc)
+
+(defun conc1f/function (place obj)
+  (nconc place (list obj)))
+
+(define-modify-macro conc1f (obj) conc1f/function)
+
+(defun concnew/function (place obj &rest args)
+  (unless (apply #'member obj place args)
+    (nconc place (list obj))))
+
+(define-modify-macro concnew (obj &rest args)
+  concnew/function)
+\end{lstlisting}
+  \caption{\gv{}上的列表操作}
+  \label{fig:list_operations_on_generalized_variables}
+  \index{concf@\texttt{concf}}
+  \index{concnew@\texttt{conc1f}}
+  \index{concnew@\texttt{concnew}}
+\end{figure}
+
+图~\ref{fig:list_operations_on_generalized_variables}\footnote{
+译者注：这里根据现行~Common Lisp 标准对源代码加以修改，我们额外定义了两个辅助函数以确保
+~\texttt{define-modify-macro} 的第三个参数只能是符号。} 包含三个破坏性修改列表结尾\index{lists!operating on end of}的
+宏。第~\ref{sec:functional_design} 节提到依赖
+\begin{lstlisting}
+(nconc x y)
+\end{lstlisting}
+的副作用是不可靠的，并且必须改成\footnote{译者注：当作为~\texttt{nconc} 第一个参数的
+变量为空列表，也就是~\texttt{nil} 时，该变量在~\texttt{nconc} 执行之后将仍是
+~\texttt{nil}，而不是整个~\texttt{nconc} 表达式的那个相当于其第二个参数的值。}
+\begin{lstlisting}
+(setq x (nconc x y))
+\end{lstlisting}
+这一习惯用法被嵌入在~\verb|concf| 中了。更特殊的~\verb|conc1f| 和
+~\verb|concnew| 就像是用于列表另一端的~\verb|push| 和~\verb|pushnew|：
+\verb|conc1f| 在列表结尾追加一个元素，而~\verb|concnew| 的功能相同，但只有当
+这个元素不在列表中时才会动作。
+
+第~\ref{sec:defining_functions} 节曾提到，函数的名字既可以是符号，也可以是~\lexpr。
+因此，把整个~\lexpr 作为第三个参数传给~\verb|define-modify-macro| 也是可行的，正如
+~\verb|conc1f| 的定义。\footnote{译者注：正如前面两个脚注里提到的那样，Common
+Lisp 标准并没有定义~\texttt{define-modify-macro} 的第三个参数可以是符号之外的其他东西
+，尽管~\lexpr 出现在一个函数调用形式的函数位置上确实是合法的。原书作者试图通过类比来说明
+~\lexpr 用在~\texttt{define-modify-macro} 中的合法性，这是不恰当的，请读者注意。}
+如果用~\pageref{fig:small_functions_which_operate_on_lists} 页上的~\verb|conc1| 的话
+，这个宏也可以写成：
+\begin{lstlisting}
+(define-modify-macro conc1f (obj) conc1)
+\end{lstlisting}
+
+在一种情况下，图~\ref{fig:list_operations_on_generalized_variables} 中的宏应该限制使用。
+如果你正准备通过在结尾处追加元素的方式来构造列表，那么最好用~\verb|push|，最后
+再~\verb|nreverse| 这个列表。在列表的开头处理数据比在结尾要方便些，因为
+在结尾处处理数据的话，你首先得到那里。Common Lisp 有许多用于前者的操作符，而适用于后者的操作符则屈指可数，
+这很可能是为了鼓励程序员设计更高效率的程序。
+
+\section{更复杂的\utility{}}
+\label{sec:more_complex_utilities}
+
+并非所有基于~\verb|setf| 的宏都可以用~\verb|define-modify-macro| 定义。
+比如说，假设我们想要定义一个宏~\verb|_f|，让它破坏性把函数应用于一个\gv{}。内置宏
+~\verb|incf| 就相当于使用了~\verb|+| 的~\verb|setf| 的缩写。把
+\begin{lstlisting}
+(setf x (+ x y))
+\end{lstlisting}
+取而代之，我们只需说
+\begin{lstlisting}
+(incf x y)
+\end{lstlisting}
+新的宏~\verb|_f| 就是上述思路的推广：\verb|incf| 能展开成对~\verb|+| 的
+调用，而~\verb|_f| 则会展开成对由第一个参数给出操作符的调用。例如，在
+第~\pageref{fig:original_move_and_scale} 页~\verb|scale-objs| 的定义里，我们
+必须这样写
+\begin{lstlisting}
+(setf (obj-dx o) (* (obj-dx o) factor))
+\end{lstlisting}
+改用~\verb|_f| 的话，将变成
+\begin{lstlisting}
+(_f * (obj-dx o) factor)
+\end{lstlisting}
+\verb|_f| 可能会被错写成：
+\begin{lstlisting}[escapechar=\@]
+(defmacro _f (op place &rest args)       @\hfill@; wrong
+  `(setf ,place (,op ,place ,@args)))
+\end{lstlisting}
+不幸的是，我们无法用~\verb|define-modify-macro| 正确无误地定义~\verb|_f|，因为
+应用到\gv{}上的操作符是由参数给定的。
+
+这类更复杂的宏必须由手工编写。为了让这种宏的编写方便些，Common Lisp 提供了函数
+~\verb|get-setf-expansion|\index{get-setf-expansion@\texttt{get-setf-expansion}}
+\footnote{译者注：原书中给出的函数实际上
+  是~\texttt{get-setf-method}\index{get-setf-method@\texttt{get-setf-method}}，
+  但这个函数已经不在现行~Common Lisp 标准中了，参见~\href{www.lisp.org/HyperSpec/Issues/iss308_w.html}{X3J13 Issue 308:
+  \texttt{SETF-METHOD-VS-SETF-METHOD}}。取代它的是
+  ~\texttt{get-setf-expansion}，这个函数接受两个参数，\emph{place} 以及
+  可选的~\emph{environment} 环境参数。本书后面对于所有采
+  用~\texttt{get-setf-method} 的地方一律直接改
+  用~\texttt{get-setf-expansion}，不再另行说明。}，它接受一个\gv{}并返回所
+有用于获取和设置其值的必要信息。通过为下面表达式手工生成展开
+式，我们将了解如何使用这些信息：
+\begin{lstlisting}
+(incf (aref a (incf i)))
+\end{lstlisting}
+
+当我们对\gv{}调用~\verb|get-setf-expansion| 时，可以得到五个值用作宏展开式
+的原材料：
+\begin{lstlisting}
+> (get-setf-expansion '(aref a (incf i)))
+(#:G4 #:G5)
+(A (INCF I))
+(#:G6)
+(SYSTEM:SET-AREF #:G6 #:G4 #:G5)
+(AREF #:G4 #:G5)
+\end{lstlisting}
+最开始的两个值分别是临时变量列表，以及应该给它们赋的值。因此，我们可以这样开始展开式：
+\begin{lstlisting}
+(let* ((#:g4 a)
+       (#:g5 (incf i)))
+  ...)
+\end{lstlisting}
+这些绑定应该在~\verb|let*|\index{let*@\texttt{let*}} 里创建。因为一般来说，这些值~form 可能会引用到前面的变量。
+第三\footnote{第三个值当前总是一个单元素列表。它被返回成一个列表来提供（目前为止
+还不可能）
+在\gv{}中保存多值的可能性。}和第五个值是另一个临时变量和将返回\gv{}初值的~form。
+由于我们想要在这个值上加~1，所以把后者包在对~\verb|1+| 的调用里：
+\begin{lstlisting}
+(let* ((#:g4 a)
+       (#:g5 (incf i))
+       (#:g6 (1+ (aref #:g4 #:g5))))
+  ...)
+\end{lstlisting}
+最后，\texttt{get-setf-expansion} 返回的第四个值是一个赋值的表达式，该赋值必须在新绑定环境下进行：
+\begin{lstlisting}
+(let* ((#:g4 a)
+       (#:g5 (incf i))
+       (#:g6 (1+ (aref #:g4 #:g5))))
+  (system:set-aref #:g6 #:g4 #:g5))
+\end{lstlisting}
+不过，这个~form 多半会引用一些内部函数\index{functions 函数!internal 内部}，而这些内部函数不属于~Common Lisp 标准。
+通常~\verb|setf| 掩盖了这些函数的存在，但它们必须存在于某处。因为关于它们的所有东西都依赖于具体的实现，所以
+注重可移植性的代码应该使用由~\verb|get-setf-expansion| 返回的这些~form，而不是直接引用诸如
+~\verb|system:set-aref| 这样的函数。
+
+现在为实现~\verb|_f| 而编写的宏，所要完成的工作，几乎和我们刚才手工展开~\verb|incf| 时做的事情完全一样。
+唯一的区别就是，不再把~\verb|let*| 里的最后一个~form 包装在~\verb|1+|
+调用里，而是将它包装在来自~\verb|_f| 参数的一个表达式里。图
+~\ref{fig:more_complex_macros_on_setf} 给出了~\verb|_f| 的定义。
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro _f (op place &rest args)
+  (multiple-value-bind (vars forms var set access)
+                       (get-setf-expansion place)
+    `(let* (,@(mapcar #'list vars forms)
+            (,(car var) (,op ,access ,@args)))
+       ,set)))
+
+(defmethod pull (obj place &rest args)
+  (multiple-value-bind (vars forms var set access)
+                       (get-setf-expansion place)
+    (let ((g (gensym)))
+      `(let* ((,g ,obj)
+              ,@(mapcar #'list vars forms)
+              (,(car var) (delete ,g ,access ,@args)))
+         ,set))))
+
+(defmacro pull-if (test place &rest args)
+  (multiple-value-bind (vars forms var set access)
+                       (get-setf-expansion place)
+    (let ((g (gensym)))
+      `(let* ((,g ,test)
+              ,@(mapcar #'list vars forms)
+              (,(car var) (delete-if ,g ,access ,@args)))
+         ,set))))
+
+(defmacro popn (n place)
+  (multiple-value-bind (vars forms var set access)
+                       (get-setf-expansion place)
+    (with-gensyms (gn glst)
+      `(let* ((,gn ,n)
+              ,@(mapcar #'list vars forms)
+              (,glst ,access)
+              (,(car var) (nthcdr ,gn ,glst)))
+         (prog1 (subseq ,glst 0 ,gn)
+                ,set)))))
+\end{lstlisting}
+  \caption{\texttt{setf} 上更复杂的宏}
+  \label{fig:more_complex_macros_on_setf}
+  \index{f@\texttt{\_f}}
+  \index{pull@\texttt{pull}}
+  \index{pull-if@\texttt{pull-if}}
+  \index{popn@\texttt{popn}}
+  \index{incf@\texttt{incf}!generalization of 的泛化}
+\end{figure}
+
+这是个很有用的\utility{}。举个例子，现在在它的帮助下，我们就可以轻易地将任意有名函数替换成
+其记忆化（第~\ref{sec:memoizing} 节）\index{memoizing 记忆化} 的等价函数。\footnote{
+然而，内置函数是个例外，它们不应该以这种方式被记忆化。Common Lisp 禁止重定义内置函数。\index{functions 函数!redefining built-in}}
+要对~\verb|foo| 进行记忆化的处理，可以用：
+\begin{lstlisting}
+(_f memoize (symbol-function 'foo))
+\end{lstlisting}
+
+使用~\verb|_f|，也有助于简化其他基于~\verb|setf| 的宏的定义。例如，我们现在可以把
+~\verb|conc1f|（图~\ref{fig:list_operations_on_generalized_variables}）
+定义成：
+\begin{lstlisting}
+(defmacro conc1f (lst obj)
+  `(_f nconc ,lst (list ,obj)))
+\end{lstlisting}
+
+图~\ref{fig:more_complex_macros_on_setf} 中还有其他一些有用的宏，它们同样基于~\verb|setf|。
+下一个是~\verb|pull|，它是内置的~\verb|pushnew| 的逆操作。这对操作符，就像是给~\verb|push|
+和~\verb|pop| 赋予了一定的鉴别能力。如果给定的新元素不是列表的成员，\verb|pushnew|\index{pushnew@\texttt{pushnew}} 就把它加入到这个列表里面，而~\verb|pull| 则是破坏性地从列表里删除给定的元素。\verb|pull|
+定义中的~\verb|&rest|\index{rest@\texttt{\&rest} parameters!in utilities} 参数使~\verb|pull| 可以接受和~\verb|delete| 相同的关键字参数：
+\begin{lstlisting}
+> (setq x '(1 2 (a b) 3))
+(1 2 (A B) 3)
+> (pull 2 x)
+(1 (A B) 3)
+> (pull '(a b) x :test #'equal)
+(1 3)
+> x
+(1 3)
+\end{lstlisting}
+你几乎可以把这个宏当成这样定义的：
+\begin{lstlisting}[escapechar=\@]
+(defmacro pull (obj seq &rest args)      @\hfill@; wrong
+  `(setf ,seq (delete ,obj ,seq ,@args)))
+\end{lstlisting}
+不过，如果它真的这样定义，它将同时碰到求值顺序和求值次数方面的问题。我们也可以把
+~\verb|pull| 定义成简单的修改宏：
+\begin{lstlisting}
+(define-modify-macro pull (obj &rest args)
+  (lambda (seq obj &rest args)
+    (apply #'delete obj seq args)))
+\end{lstlisting}
+但由于修改宏必须将\gv{}作为第一个参数，所以我们只得以相反的次序给出前两个参数，这样显得
+有些不自然。
+
+更通用的~\verb|pull-if| 接受一个初始的函数参数，并且会展开成
+~\verb|delete-if| 而非~\verb|delete|：
+\begin{lstlisting}
+> (let ((lst '(1 2 3 4 5 6)))
+    (pull-if #'oddp lst)
+    lst)
+(2 4 6)
+\end{lstlisting}
+
+这两个宏说明了另一个有普遍意义的要点。如果下层函数接受可选参数，建立在其上的宏也应该这样做。
+\verb|pull| 和~\verb|pull-if| 都把可选参数传给了它们的~\verb|delete|。
+
+图~\ref{fig:more_complex_macros_on_setf} 中最后一个
+宏是~\verb|popn|，它是~\verb|pop| 的推广形式。其功能不再是仅仅从列表里弹
+出一个元素，而是能弹出并返回任意长度的子序列：
+\begin{lstlisting}
+> (setq x '(a b c d e f))
+(A B C D E F)
+> (popn 3 x)
+(A B C)
+> x
+(D E F)
+\end{lstlisting}
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro sortf (op &rest places)
+  (let* ((meths (mapcar #'(lambda (p)
+                            (multiple-value-list
+                              (get-setf-expansion p)))
+                        places))
+         (temps (apply #'append (mapcar #'third meths))))
+    `(let* ,(mapcar #'list
+                    (mapcan #'(lambda (m)
+                                (append (first m)
+                                        (third m)))
+                            meths)
+                    (mapcan #'(lambda (m)
+                                (append (second m)
+                                        (list (fifth m))))
+                            meths))
+       ,@(mapcon #'(lambda (rest)
+                     (mapcar
+                       #'(lambda (arg)
+                           `(unless (,op ,(car rest) ,arg)
+                              (rotated ,(car rest) ,arg)))
+                       (cdr rest)))
+                 temps)
+       ,@(mapcar #'fourth meths))))
+\end{lstlisting}
+  \caption{一个排序其参数的宏}
+  \label{fig:a_macro_which_sorts_its_arguments}
+  \index{sortf@\texttt{sortf}}
+  \index{sorting!of arguments}
+\end{figure}
+
+图~\ref{fig:a_macro_which_sorts_its_arguments} 中的宏能对它
+的参数排序。如果~\verb|x| 和~\verb|y| 是变量，而且我们想要确
+保~\verb|x| 的值不是两个值中较小的那个，那么我们可以写：
+\begin{lstlisting}
+(if (> y x) (rotatef x y))
+\end{lstlisting}
+但如果我们想对三个或者数量更多的变量做这个操作，所需的代码量就会迅速膨胀。与其手工编写这样的代码，不妨让~\verb|sortf| 来为我们代劳。这个宏接受一个比较操作符，还有任意数量的\gv{}，然后不断交换它们
+的值，直到这些\gv{}的顺序符合操作符的要求。在最简单的情形，参数可以是普通变量：
+\begin{lstlisting}
+> (setq x 1 y 2 z 3)
+3
+> (sortf > x y z)
+3
+> (list x y z)
+(3 2 1)
+\end{lstlisting}
+一般情况下，它们可以是任何可逆的表达式。假设~\verb|cake| 是一个可逆函
+数，它能返回某人的蛋糕，而~\verb|bigger| 是个针对蛋糕的比较函数。如
+果我们想要推行一个规定，要求~\verb|moe| 的~\verb|cake| 不得小
+于~\verb|larry| 的~\verb|cake|，而后者的~\verb|cake| 也不得小
+于~\verb|curly| 的，我们写成：
+\begin{lstlisting}
+(sortf bigger (cake 'moe) (cake 'larry) (cake 'curly))
+\end{lstlisting}
+
+\verb|sortf| 的定义的大致结构和~\verb|_f| 差不多。它以一
+个~\verb|let*| 开始，在这个~\verb|let*| 表达式中，由~\verb|get-setf-expansion| 返回的临时变量被绑
+定到~\gv{} 的初始值上。\verb|sortf| 的核心是中间
+的~\verb|mapcon|\index{mapcon@\texttt{mapcon}} 表达式，该表达式生成的代
+码将被用来对这些临时变量进行排序。宏的这部分生成的代码量会随着参数个数以指数
+速度增长。在排序之后，\gv{}会被用那些由~\verb|get-setf-expansion|返回的~form 
+重新赋值。这里使用的算法是~$O(n^2)$ 的冒泡排序，但如果调用的时候参数非常多的话，
+这个宏就不适用了。
+
+\begin{figure}
+\begin{lstlisting}
+(sortf > x (aref ar (incf i)) (car lst))
+\end{lstlisting}
+展开~(在某个可能的实现里) 成：
+\begin{lstlisting}
+(let* ((#:g1 x)
+       (#:g4 ar)
+       (#:g3 (incf i))
+       (#:g2 (aref #:g4 #:g3))
+       (#:g6 lst)
+       (#:g5 (car #:g6)))
+  (unless (> #:g1 #:g2)
+    (rotatef #:g1 #:g2))
+  (unless (> #:g1 #:g5)
+    (rotatef #:g1 #:g5))
+  (unless (> #:g2 #:g5)
+    (rotatef #:g2 #:g5))
+  (setq x #:g1)
+  (system:set-aref #:g2 #:g4 #:g3)
+  (system:set-car #:g6 #:g5))
+\end{lstlisting}
+  \caption{一个~\texttt{sortf} 调用的展开式}
+  \label{fig:expansion_of_a_call_to_sortf}
+\end{figure}
+
+图~\ref{fig:expansion_of_a_call_to_sortf} 给出的是对~\verb|sortf| 调用的
+展开式。在最前面的~\verb|let*| 中，参数和它们的~subform 按照从左到右的顺
+序小心地求值。之后出现的三个表达式分别比较几个临时变量的值，有可能还会
+交换它们：先是比较第一个和第二个，接着是第一个和第三个，然后第二个和第
+三个。最后\gv{}从左到右被重新赋值。尽管很少需要注意这个问题，但还是提一
+下：通常，宏参数应该按从左到右的顺序进行赋值\index{assignment 赋值!order
+  of 的顺序} ，这和它们求值的顺序是一致的。
+
+有些操作符，如~\verb|_f| 和~\verb|sortf|，它们与接受函数型参数的函数之间确实有相似之处\index{functions 函数!as arguments}。
+不过也应该认识到它们是完全不同的东西。类似~\verb|find-if| 的函数接受一个函数并调用它；
+而类似~\verb|_f| 的宏接受的则是一个\emph{名字}，这些宏会让它成为一个表达式的~car。
+让~\verb|_f| 和~\verb|sortf| 都接受函数型参数也不无可能。例如，\verb|_f| 可以
+这样实现：
+\begin{lstlisting}
+(defmacro _f (op place &rest args)
+  (let ((g (gensym)))
+    (multiple-value-bind (vars forms var set access)
+                         (get-setf-expansion place)
+      `(let* ((,g ,op)
+              ,@(mapcar #'list vars forms)
+              (,(car var) (funcall ,g ,access ,@args)))
+         ,set))))
+\end{lstlisting}
+然后调用~\verb|(_f #'+ x 1)|。但是~\verb|_f| 原来的版本不但拥有这个版本
+的所有功能，而且由于它处理的是名字，所以它还可以接受宏或者~special form 的名字。就像
+~\verb|+| 那样，比如说，你还可以调用~\verb|nif|
+（\pageref{fig:macros_for_conditional_evaluation} 页）：
+\begin{lstlisting}
+> (let ((x 2))
+    (_f nif x 'p 'z 'n)
+    x)
+P
+\end{lstlisting}
+
+\section{定义\inversion}
+\label{sec:defining_inversions}
+\index{inversions!defining}
+
+\ref{sec:gv:the_concept} 节说明了一个道理：如果一个宏调用能展开成可逆引用，那么它本身应该也是可逆的。
+不过，你也用不着只是为了可逆，就把操作符定义成宏。通过使用~\verb|defsetf|\index{defsetf@\texttt{defsetf}}，你可以告诉~Lisp
+如何对任意的函数或宏调用求逆。
+
+使用这个宏的方法有两种。在最简单的情况下，它的参数是两个符号：
+\begin{lstlisting}
+(defsetf symbol-value set)
+\end{lstlisting}
+\index{set@\texttt{set}}
+\index{symbol-value@\texttt{symbol-value}}
+如果用更复杂的方法，那么~\verb|defsetf| 的调用和~\verb|defmacro| 调用会有几分相似，
+它另外带有一个参数用于更新值~form。例如，下式可以为~\verb|car| 定义一种可能的\inversion：
+\begin{lstlisting}
+(defsetf car (lst) (new-car)
+  `(progn (rplaca ,lst ,new-car)
+          ,new-car))
+\end{lstlisting}
+\verb|defmacro| 和~\verb|defsetf| 之间有一个重要的区别：后者会自动为其参数创建
+生成符号~(gensym)。通过上面给出的定义，\verb|(setf (car x) y)| 将展开成：
+\begin{lstlisting}
+(let* ((#:g2 x)
+       (#:g1 y))
+  (progn (rplaca #:g2 #:g1)
+         #:g1))
+\end{lstlisting}
+这样，我们写~\verb|defsetf| 展开器时就没有后顾之忧，
+不用担心诸如变量捕捉，或者求值的次数和顺序之类的问题了。
+
+在~\textsc{cltl}2 的~Common Lisp 中，也可以直接用~\verb|defun| 定义
+~\verb|setf| 的逆\index{defun@\texttt{defun}!defining inversions with}。因而前面的示例也可以写成：
+\begin{lstlisting}
+(defun (setf car) (new-car lst)
+  (rplaca lst new-car)
+  new-car)
+\end{lstlisting}
+新的值应该作为这个函数的第一个参数。同样按照习惯，也应该把这个值作为函数的返回值。
+
+目前为止的示例都认为，\gv{}应该指向数据结构中的某个位置。\index{generalized variables 广义变量!meaning of}不法之徒把人质带进地牢，而见义勇为之士则让她重见天日；
+他们移动的路径相同，但方向相反。所以，如果人们觉得~\verb|setf| 的工作方式也
+只能是这样，那不足为奇，因为所有预定义的逆看上去都是如此；确实，习惯上，将被求逆的参数
+也常会使用~\verb|place| 作为其参数名。
+
+从理论上说，\verb|setf| 可以更一般化：access form 和它的逆的操作对象甚至可以不是同种数据结构。
+假设在某个应用里，我们想要把数据库的更新缓存起来\index{databases 数据库!caching updates to 缓存更新}。
+这可能是迫不得已的，举例来说，倘若每次修改数据，都即时完成真正的更新操作，就有可能会降低效率，或者，如果要求所有的更新都必须在提交之前验证一致性，那就必须引入缓存的机制。
+
+\begin{figure}
+\begin{lstlisting}
+(defvar *cache* (make-hash-table))
+
+(defun retrieve (key)
+  (multiple-value-bind (x y) (gethash key *cache*)
+    (if y
+        (values x y)
+        (cdr (assoc key *world*)))))
+
+(defsetf retrieve (key) (val)
+  `(setf (gethash ,key *cache*) ,val))
+\end{lstlisting}
+  \caption{一个非对称的逆}
+  \label{fig:an_asymmetric_inversion}
+  \index{inversions!asymmetric}
+\end{figure}
+
+假设~\texttt{*world*} 是实际的数据库。为简单起见，我们将它做成一个元素为~\texttt{
+(\emph{key} . \emph{val})} 形式的关联表~（assoc--list）。图
+~\ref{fig:an_asymmetric_inversion} 显示了一个称为~\texttt{retrieve} 的查询函数。
+如果~\texttt{*world*} 是
+\begin{lstlisting}
+((a . 2) (b . 16) (c . 50) (d . 20) (f . 12))
+\end{lstlisting}
+那么
+\begin{lstlisting}
+> (retrieve 'c)
+50
+\end{lstlisting}
+和~\verb|car| 的调用不同，\verb|retrieve| 调用并不指向一个数据结构中的特定
+位置。返回值可能来自两个位置里的一个。而~\verb|retrieve| 的逆，同样定义在
+图~\ref{fig:an_asymmetric_inversion} 中，仅指向它们中的一个：
+\begin{lstlisting}
+> (setf (retrieve 'n) 77)
+77
+> (retrieve 'n)
+77
+T
+\end{lstlisting}
+该查询返回第二个值~\verb|t|，以表明在缓存中找到了答案。
+
+就像宏一样，\gv{} 是一种威力非凡的抽象机制。这里肯定还有更多的东西有待发掘。当然，有的用户很可能已经发现了
+一些使用\gv{}的方法，使用这些方法能得到更优雅和强大的程序。但也不排除以全新的方式使用
+~\verb|setf| 逆的可能性，或者发现其它类似的有用的变换技术\note{180}。
+
+%%% Local Variables: 
+%%% coding: utf-8
+%%% mode: latex
+%%% TeX-master: "onlisp-cn"
+%%% End: 

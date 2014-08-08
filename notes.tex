@@ -1,0 +1,761 @@
+%!TEX encoding = UTF-8 Unicode
+% $Id: notes.tex 5 2009-08-07 08:40:43Z binghe $
+
+\chapter{附注}
+\label{chap:notes}
+
+本节同时也作为参考文献。所有列在这里的书籍和论文都值得一读。
+
+\begin{notes}
+\notei{v}
+  Foderaro, John K. Introduction to the Special Lisp
+  Section. \emph{CACM} 34, 9 (September 1991), p. 27.
+
+\notei{viii}
+  最终的~Prolog 实现有~94 行代码。它使用了来自前面章节的~90 行的\utility。
+  \textsc{atn} 编译器增加了~33 行，这样总共是~217 行。由于~Lisp 下的一行
+  代码没有标准的表示法，这样当使用行数来衡量一个~Lisp 程序的规模时就会有
+  很多偏差。\index{lengths of programs}
+
+\notei{ix}
+  Steele, Guy L., Jr. \emph{Common Lisp: the Language}, 2nd
+  Edition. Digital Press, Bedford (MA), 1990.
+
+\notei{5}
+  Brooks, Frederick P. \emph{The Mythical Man-Month}. Addison-Wesley,
+  Reading (MA), 1975, p. 16.
+
+\notei{18}
+  Abelson, Harold, and Gerald Jay Sussman, with Julie
+  Sussman. \emph{Structure and Interpretation of Computer Programs}. MIT
+  Press, Cambridge, 1985.
+
+\notei{21}
+  更准确地说，我们是无法仅仅用一个~\lexpr{}定义出递归函数的。不过，还是有
+  办法写一个函数，让它把自己作为另外的一个参数传入，进而生成递归函数，
+\begin{verbatim}
+(setq fact
+      #'(lambda (f n)
+           (if (= n 0)
+               1
+               (* n (funcall f f (- n 1))))))
+\end{verbatim}
+\index{factorials}
+  然后，再把这个函数传给另一个函数，后者会返回一个闭包，在闭包里最早
+  的那个函数将会调用它自己：
+
+\begin{verbatim}
+(defun recurser (fn)
+  #'(lambda (&rest args)
+      (apply fn fn args)))
+\end{verbatim}
+\index{recurser@\texttt{recurser}}
+  把~\texttt{fact} 传给~\texttt{recurser} 就会得到一个普通的阶乘函数，
+
+\begin{verbatim}
+> (funcall (recurser fact) 8)
+40320
+\end{verbatim}
+  这个阶乘函数可以直接这样表示：
+\begin{verbatim}
+((lambda (f) #'(lambda (n) (funcall f f n)))
+ #'(lambda (f n)
+     (if (= n 0)
+         1
+         (* n (funcall f f (- n 1))))))
+\end{verbatim}
+\index{recursion 递归!without naming}
+  多数~Common Lisp 用户会觉得，如果用~\texttt{label} 或
+  者~\texttt{alambda} 的话，会方便很多。
+
+\notei{23}\index{Lisp!speed of}
+  Gabriel, Richard P. Performance and
+  Standardization. \emph{Proceedings of the First International
+    Workshop on Lisp Evolution and Standardization}, 1988,
+  p. 60. 在一个实现中，通过测试~\texttt{triangle}，Gabriel
+  发现~``即使给~C 编译器提供手动的寄存器分配提示，Lisp 代码
+  的效率仍然比该函数的~C 语言迭代版本要高出~17\%。''他的论文中还提到其
+  他几个程序的速度都要优于对应的~C\index{C} 语言版本，其中一个的性能高出~42\%。
+
+\notei{24}
+  如果你希望编译所有加载了的有名函数的话，
+  可以调用~\verb|compall|\index{compall@\texttt{compall}}：
+\begin{verbatim}
+(defun compall ()          
+  (do-symbols (s)
+    (when (fboundp s)
+      (unless (compiled-function-p (symbol-function s))
+        (print s)                   
+        (compile s)))))        
+\end{verbatim}
+\index{fboundp@\texttt{fboundp}}
+  这个函数每编译一个函数，就会打印出其函数名。
+
+\notei{26}
+  你可以调用~\texttt{(disassemble 'foo)} 来检查~inline 声明是
+  否生效，这个调用会显示出函数~\texttt{foo} 某种形式的~object code。这
+  同时也是检验尾递归优化是否完成的一个办法\index{tail-recursion optimization 尾递归优化!testing for 检验}。
+
+\notei{31}
+  不妨把~\texttt{nreverse} 想象成是如下那样定义的：
+\begin{verbatim}
+(defun our-nreverse (lst)          
+  (if (null (cdr lst))
+      lst
+      (prog1 (nr2 lst)                            
+             (setf (cdr lst) nil))))
+
+(defun nr2 (lst)
+  (let ((c (cdr lst)))          
+    (prog1 (if (null (cdr c))                             
+               c
+               (nr2 c))
+           (setf (cdr c) lst)))) 
+\end{verbatim}
+\index{nreverse@\texttt{nreverse}!sketch of}
+
+\notei{43}
+优秀的设计通常会把精简节约放在首位，但是程序追求短小精悍的原因却又多
+了一层。程序要是写得简洁明了，你就能短时间内理解更多的代码。
+
+大家都知道：只要能对从事的事情有大局观，设计就会变得容易一些。所以油画
+家喜欢用长柄的画刷，而且时不时地退后两步端详他们的作品。所以将领宁愿把
+自己置身于敌军炮火，也要在高地运筹帷幄。而程序员愿意花比小显示器更多的
+钱，购置大屏幕显示器的原因也在于此。
+
+紧凑的程序能让人的视野发挥其最大的功用。指挥官无法让一场战役在桌面
+上进行，而~Lisp 却能让你把程序中的抽象逻辑浓缩在方寸之间。而且，同
+时能看到的代码越多，越有可能把代码写得规整一致。
+
+这样说并不是要求不计代价，把程序写得越短越好。要是把一个函数里所有的
+换行都删掉，你也可以把它写在一行里面，但是这样做对可读性并没有帮助。紧
+凑的代码要求借助抽象的机制来精简代码，而非通过文本编辑来达到目的。
+
+不妨试想一下，如果你现在用一个比原来小一半的显示器来写程序，那会多么痛
+苦啊。让你的代码缩小到原先的一半大小，一定会让编程更加得心应手。
+
+\notei{44}
+  Steele, Guy L., Jr. Debunking the ``Expensive Procedure Call'' Myth
+  or, Procedural Call Implementations Considered Harmful or, LAMBDA:
+  The Ultimate \textsc{Goto}.  \emph{Proceedings of the National Conference of the ACM}, 1977, p. 157.
+
+\notei{48}
+  仅供参考，下面提供了与图~\ref{fig:larger_functions_that_operate_on_lists} 
+  和图~\ref{fig:doubly-recursive_list_utilities} 中对应函数更简单的实现\label{notes:simplified-implementation}。
+  这些实现都相当慢~(至少慢~10\%)\index{prune@\texttt{prune}!simpler version}：
+
+\begin{verbatim}
+(defun filter (fn lst)
+  (delete nil (mapcar fn lst)))
+
+(defun filter (fn lst)
+  (mapcan #'(lambda (x)
+              (let ((val (funcall fn x)))
+                (if val (list val))))
+          lst))
+
+(defun group (source n)
+  (if (endp source)
+      nil
+      (let ((rest (nthcdr n source)))
+        (cons (if (consp rest) (subseq source 0 n) source)
+              (group rest n)))))
+
+(defun flatten (x)
+  (mapcan #'(lambda (x)
+              (if (atom x) (mklist x) (flatten x)))
+          x))
+
+(defun prune (test tree)
+  (if (atom tree)
+      tree
+      (mapcar #'(lambda (x)
+                   (prune test x))
+              (remove-if #'(lambda (y)
+                             (and (atom y)
+                                  (funcall test y)))
+                         tree))))
+\end{verbatim}
+\index{group@\texttt{group}!simpler version}
+\index{filter@\texttt{filter}!simpler version}
+\index{flatten@\texttt{flatten}!simpler version}
+\notei{49}
+  如果像这样实现，\texttt{find2} 在走过~dotted list\index{lists!dotted} 的末端时，会产生一个错误：
+\begin{verbatim} 
+> (find2 #'oddp '(2 . 3)) 
+>>Error: 3 is not a list.
+\end{verbatim} 
+  \textsc{Cltl}2 (p. 31) 提到，如果函数期望的是列表，却传给它一个~dotted
+  list，这样做就是错误的。Common Lisp 实现没有义务去检测这种编程错
+  误，所以有的能纠错，有的就不行。倘若函数接受序列~(sequence)，这个规定
+  就会显得有些含混不清。因为~dotted list 是一个~cons，而~cons 是序列。所以，
+  如果严格遵守~\textsc{cltl} 的话，就应该要求
+\begin{verbatim}
+(find-if #'oddp '(2 . 3))
+\end{verbatim} 
+返回~\texttt{nil}，而不是报错。因为~\texttt{find-if} 的参数应该是个序
+列。
+
+各个实现对这个表达式的反应不尽相同。有的还是会报个错，有的则会返回~\texttt{nil}。
+然而，即使是遵循书中要求，在本例中表现良好的实现也会把握不住方向。比如，它们就会
+认为~\texttt{(concatenate 'cons '(a . b) '(c . d))} 的结果是~\texttt{(a c . d)}，
+而非~\texttt{(a c)}。
+
+本书中，凡是接受列表的\utility，要的都是正规~(proper) 的列表。用来处理
+序列的\utility，都能对付~dotted list。不过，如果一个函数没有特别声明它
+能处理~dotted list，你就传给它，那无异于自找麻烦。
+
+\notei{66}
+
+倘若我们知道每个函数的参数个数，就能写出一个~\texttt{compose}，让~$f
+\circ g$ 里面，$g$ 返回的多值成为~$f$ 对应的参数。在~\textsc{cltl2}
+中，有这么一个新函数叫~\texttt{function-lambda-expression}\index{function-lambda-expression@\texttt{function-lambda-expression}}\index{Common Lisp!differences between versions!function-lambda-expression@\texttt{function-lambda-expression}}，通过它给出
+的~\lexpr{}，可以看出函数最初的源代码。不过它也可能返回~\texttt{nil}，这
+种情况常常发生在内建函数上。我们真正需要的是一个函数，它能从传入的函数参数
+得到该函数的参数列表。
+
+\notei{73}
+
+要让~\texttt{rfind-if}\index{rfind-if@\texttt{rfind-if}!alternate version} 搜索整个子树，可以这样定义它：
+
+\begin{verbatim}
+(defun rfind-if (fn tree) 
+  (if (funcall fn tree) 
+      tree
+      (if (atom tree) 
+          nil
+          (or (rfind-if fn (car tree))
+              (and (cdr tree) (rfind-if fn (cdr tree)))))))
+\end{verbatim} 
+
+传入的第一个函数参数会同时应用于原子和列表： 
+
+\begin{verbatim}
+> (rfind-if (fint #'atom #'oddp) '(2 (3 4) 5))
+3
+> (rfind-if (fint #'listp #'cddr) '(a (b c d e)))
+(B C D E)
+\end{verbatim}
+
+\notei{95}
+  McCarthy, John\index{McCarthy, John}, Paul W. Abrahams\index{Abrahams, Paul W.}, Daniel J. Edwards\index{Edwards, Daniel J.}, Timothy P. Hart\index{Hart, Timothy P.}, and Michael I. Levin\index{Levin, Michael I.}. \emph{Lisp 1.5 Programmer's Manual}, 2nd Edition. MIT Press, Cambridge, 1965, pp. 70-71.  
+
+\notei{106}
+  第~\ref{sec:when_nothing_else_will_do} 节提到，有种操作符只能写成宏，它的意思
+  是：如果是用户想定义这种操作符的话，那就只能用宏。虽然宏能完成的工作，special form\index{special forms} 
+  都能胜任。但是我们却无法定义新的~special form。
+
+  special form 之所以被称为~special form，是因为它求值时是
+  被当作特殊情况处理的。在解释器里，你可以把~\texttt{eval} 想象成一个庞大的
+  ~\texttt{cond} 表达式：
+\begin{verbatim}
+(defun eval (expr env)
+  (cond ...
+        ((eq (car expr) 'quote) (cadr expr))
+        ...
+        (t (apply (symbol-function (car expr))
+                  (mapcar #'(lambda (x)
+                              (eval x env))
+                          (cdr expr))))))
+\end{verbatim}
+\index{eval@\texttt{eval}!sketch of}
+  缺省情况的语句处理了绝大多数表达式，在这个语句里，先从~car 里取出其指向的函数，
+  然后用它对~cdr 里所有的参数求值，最后把前者应用于后者的结果作为返回值返回。
+  然而，如果有表达式的样子类似于~\texttt{(quote x)}\index{quote@\texttt{quote}}，那么它的处理方式就不能继续
+  用这种方法了。原因在于，引用的全部意义就是在于让它的参数免于求值。因此，\texttt{eval} 
+  必须有一个语句，专门对付这种引用表达式。编程语言的设计者把~special form 当成
+  宪法修正案。这种条款是必不可少的，但是越少越好。\textsc{Cltl}2 在第~73 页列出
+  了~Common Lisp 里所有的~special form。
+  
+  前面对~\texttt{eval} 的粗糙演绎不够准确，其原因在于它取得函数先于对参数求值。
+  而在~Common Lisp 里，这两个操作的顺序是有意没有规定的。欲了解~Scheme 中~\texttt{eval}
+  的初步实现，可以参考~Abelson and Sussman, p. 299。
+
+\notei{115}
+  简单说，如果编写一个\utility{}函数能帮助省下它自身的代码量，那么它的存在就是合理的。
+  但如果~\utility{}是宏的话，标准应该更高一点。看懂宏调用比看懂函数调用要费劲些，因
+  为它们有可能会违反~Lisp 的求值规则。在~Common Lisp 里，求值规则是这样规定的：
+  表达式的值的计算方法如下，car 里指定的是函数名，而~cdr 中指定了参数列表，
+  参数列表求值的顺序是从左至右，然后将函数应用于参数列表，所得到的结果则作为
+  表达式的值。由于函数调用都遵循着这个规则，所以弄懂~\texttt{find2} 并不比
+  理解~\texttt{find-books} 更困难~(第~\pageref{func:find-books} 页)。
+
+  然而，宏在很多情况下并不遵守~Lisp 的这个求值规范。(要是有宏遵守的话，
+  你或许当初就应该用函数来实现它。) 原则上来讲，每个宏都定义了它自己的一套求
+  值规则，而~reader 只有在读取了宏的定义之后，才能知道这套规则到底是怎
+  么样的。总而言之，一个宏的存在是不是有意义，要视其可读性而定，同时它
+  节省的代码量必须要远大于其自身的代码量。\index{macros 宏!justification of}
+
+
+\notei{126}
+
+  和书中其它几个~\texttt{for} 一样，
+  图~\ref{fig:avoiding_capture_with_closure} 中定义的~\texttt{for}，
+  对~\texttt{do} 表达式里的~initform 也有着相同的假设，即这个~initform
+  是从左到右求值的，只有满足这个要求，\texttt{for} 的定义才是正确的。
+  \textsc{Cltl}2 (p. 165) 提到这个说法对~stepform 成立，但是
+  对~initform 却只字未提。
+
+  把这个问题当成一次疏忽大意的结果也未尝不可。一般来说，如果有操作的顺
+  序没有被指定，\textsc{cltl} 应该会特意指出来的。而且，也没有理由不
+  把~\texttt{do} 的~initform 的求值顺序确定下来。因为~\texttt{let} 的求
+  值是从左到右的，而~\texttt{do} 自己的~stepform 的求值顺序也是一样的。
+
+\notei{128}
+
+  Common Lisp 的~\texttt{gentemp}\index{gentemp@\texttt{gentemp}} 和~\texttt{gensym} 差不多，其不同之处
+  在于，前者会~intern 它生成的符号。和~\texttt{gensym} 一样，
+  \texttt{gentemp} 在内部维护着一个计数器，这个计数器在构造~print
+  name 的时候会用到。如果~\texttt{gentemp} 在生成某个符号的时候，当前
+  的~package 里已经有了这个符号，它就会递增计数器，然后再试一次：
+
+\begin{verbatim}
+> (gentemp)
+T1
+> (setq t2 1)
+1
+> (gentemp)
+T3
+\end{verbatim}
+
+这样，就保证了新创建的符号是独一无二的。然而，也可以想见，
+\texttt{gentemp} 生成的符号还是无法完全免于名字冲突。尽
+管~\texttt{gentemp} 有能力确保生成的符号是迄今为止还没有出现过，但是它
+无法预见将来会出现些什么符号。既然~\texttt{gensyms} 能很好地完成工作，
+而且绝大多数时候是安全的，那么为什么还要用~\texttt{gentemp} 呢？实际
+上，对于编写宏来说，\texttt{gentemp} 唯一的优点就是它产生的符号可以写出
+去，之后再读进来，在这种情景下，这些符号就没有必要是唯一的了。
+
+\notei{131}
+
+对于~Scheme 来说，由于它采用的是统一的名字空间\index{name-spaces}，函数的名字捕捉会带来更
+多的麻烦。在过去，Scheme 标准一直没有对宏定义方法的给出一个正式的规定\index{Scheme!macros in}，
+这个状态一直持续到~1991 年才有所改观。当前，Scheme 提供的卫生
+宏~(hygienic macro\index{hygienic macros}\index{macros 宏!hygienic}) 和~\texttt{defmacro} 之间的区别相当大。欲知详情，或
+是想了解近来相关的参考文献，可见最新的~Scheme report\footnote{译者注：
+迄今为止，最新的~Scheme report 为
+~\href{http://www.r6rs.org/}{\textsc{r6rs}}。}。
+
+\notei{137}
+
+Miller, Molly M., and Eric Benson. \emph{Lisp Style and Design}.  Digital
+Press, Bedford (MA), 1990, p. 86.  
+
+\notei{158}
+
+如果不写~\texttt{mvpsetq}，改成定义~\texttt{values} 的逆操作\index{values@\texttt{values}!inversion for 逆操作}可能会让代码更简洁些。
+这样，就不再是
+\begin{verbatim}
+(mvpsetq (w x) (values y z) ...)
+\end{verbatim} 
+我们会这样写
+\begin{verbatim}
+(psetf (values w x) (values y z) ...)
+\end{verbatim}
+
+如果有了~\texttt{values} 的逆，那么~\texttt{multiple-value-setq} 也可以
+淘汰了。不过，遗憾的是，由于~Common Lisp 的固有特性，无法定义这样的逆操
+作。\texttt{get-setf-method} 不可能返回一个以上的~store variable，因此
+可以推知，就算~\texttt{get-setf-method} 真的这样做的话，\texttt{psetf}
+的展开函数也不会知道该如何应对这种情况。
+
+\notei{180}
+
+\texttt{setf} 教给我们的其中一件事，就是有的宏能完成相当数量的计算工
+作，同时让源代码变得清晰可读。最终，\texttt{setf} 可能是被用来进行
+带~assertion 编程的宏之一。
+
+举例来说，如果能有个宏~\texttt{insist}，它可能会对我们有所帮助。它接受
+的表达式的模样像这样：\texttt{($predicate$ . $arguments$)}，如果表达式
+的值不为真，宏就会想办法让它成为真。\texttt{setf} 必须被告知如何进行引
+用的逆操作，同样的道理，这个宏一样得知道如何把表达式的值变成真。一般情
+况下，这种宏调用可能会最终调用~Prolog。
+
+\notei{198}
+
+Gelernter, David H., and Suresh Jagannathan. \emph{Programming Linguistics}.
+MIT Press, Cambridge, 1990, p. 305.
+
+\notei{199}
+
+Norvig, Peter. \emph{Paradigms of Artificial Intelligence Programming: Case
+Studies in Common Lisp}. Morgan Kaufmann, San Mateo (CA), 1992, p. 856.
+
+\notei{213}
+
+这个叫~\texttt{least-negative-normalized-double-float} 的常量和它三个兄弟
+的名字长度在~Common Lisp 里排名并列第一，均达~38 个字符。名字最长的操作符
+是~\texttt{get-setf-method-multiple-value}，共计~30 个字符。\index{Common Lisp!long names in}下面的表达
+式将会返回一个列表，列表里把当前包中所有可见符号按照名字从长到短排了一遍：
+     
+\begin{verbatim}
+(let ((syms nil))
+  (do-symbols (s)
+    (push s syms))
+  (sort syms
+        #'(lambda (x y)
+             (> (length (symbol-name x))
+                (length (symbol-name y))))))
+\end{verbatim}
+
+
+\notei{217}
+\label{notes:difference-null-environment}
+跟据~\textsc{cltl}2，宏展开函数的定义环境\index{environment!of macro
+expanders 宏展开器}\index{macros 宏!environment of expander}应该就在~\texttt{defmacro} 表达式出现的地方。这样的
+话，我们就可以把~\texttt{propmacro}\index{propmacro@\texttt{propmacro}!alternative definition} 定义得更简洁：
+
+\begin{verbatim}
+(defmacro propmacro (propname)
+  `(defmacro ,propname (obj)
+     `(get ,obj ',propname)))
+\end{verbatim}
+
+不过~\textsc{cltl}2 并没有点明，究竟最初传给~\texttt{propname} 的~form
+是不是词法环境的一部分，其中，词法环境是里面的~\texttt{defmacro} 发生的地
+方。照道理说，如果是用~\texttt{(propmacro color)} 定义
+的~\texttt{color}，那么它就等价于：
+
+\begin{verbatim}
+(let ((propname 'color))
+  (defmacro color (obj)
+    `(get ,obj ',propname)))
+\end{verbatim}
+或是
+\begin{verbatim}
+(let ((propname 'color))
+  (defmacro color (obj)
+    (list 'get obj (list 'quote propname))))
+\end{verbatim}
+
+可是，至少有几个~\textsc{cltl2} 实现，在它们里面新版
+的~\texttt{propname} 无法正常工作。在~\textsc{cltl}1 里面则认为宏的展开
+函数是在一个空的词法环境\index{environment!null 空}里定义的。所以，为了
+最大的可移植性，不管如何，宏定义应该避免使用外部的环境。
+
+\notei{238}
+
+有时，会把类似~\texttt{match} 的函数说成一种合一运算~(unification)\index{unification 合一}
+\footnote{译者注：\emph{合一}是符号逻辑中的概念，常用在谓词演算的归结
+中。简单说，合一就是：为多个~(通常为两个) 命题中的自由变量找到对应的
+值~(或者代换关系)，令命题间的匹配关系得以满足，从而把几个命题合成一个新
+的命题。可以说，合一是一种广义的模式匹配操作。}。但这种说法不是很准确。
+比如说，\texttt{match} 可以把~\texttt{(f ?x)} 和~\texttt{?x} 匹配起来，
+但是两个表达式是不可合一的。
+
+如果需要合一的详细描述，可见: Nilsson, Nils J. \emph{Problem-Solving
+Methods in Artificial Intelligence}\footnote{译者注：亦可参考：Nilsson, Nils J. 
+\emph{Artificial Intelligence: A New Synthesis}. Morgan Kaufmann, 1998, pp. 253-255. }. McGraw-Hill,
+New York, 1971, pp. 175-178.
+
+\notei{244-1}
+
+并不是一定要把未绑定的变量用~gensym 来表示，在运行时调
+用~\texttt{gensym?} 也不是唯一的选择。
+图~\ref{fig:fast_matching_operator} 和
+图~\ref{fig:fast_matching_operator_continued} 中展开生成的代码也可以这
+样写，让程序记住那些绑定代码已经生成了的变量。不过，如果要这样实现的
+话，代码很可能需要从把逻辑从里到外颠倒一下：即不再在递归返回的时候生成
+展开代码，而是要在递归过程层层递进的时候累积代码。
+
+\notei{244-2}
+
+在~\texttt{if-match} 匹配模式中，类似~\texttt{?x} 的符号代表的总是新变
+量，这和~\texttt{let} 绑定语句中~car 指向的符号情况一样。因此，
+尽管~Lisp 变量可以用在匹配模式里，但是外部查询中的匹配变量却不行。
+原因是，虽然你可以用一样的\emph{符号}，但是它代表是个不一样的新变量。
+要检验两个列表的第一个元素是不是一样的，用下面的代码是无法完成任务的：
+   
+\begin{verbatim}
+(if-match (?x . ?rest1) lst1
+    (if-match (?x . ?rest2) lst2
+        ?x))
+\end{verbatim}
+
+在本例中，第二个~\texttt{?x} 是个新变量。如
+果~\texttt{lst1} 和~\texttt{lst2} 都至少有一个元素，那么上面的表达式会总是返回~\texttt{lst2} 的~car。
+
+然而，由于你可以在~\texttt{if-match} 中的匹配模式里
+使用~(没有~\texttt{?} 过的) Lisp 变量，所以下面的代码可以带给你期望的效果：
+\begin{verbatim}
+(if-match (?x . ?rest1) lst1
+    (let ((x ?x))
+      (if-match (x . ?rest2) lst2
+          ?x)))
+\end{verbatim}
+
+这个限制和解决的办法同样也适用于第~\ref{chap:a_query_compiler} 章和
+第~\ref{chap:prolog} 章里定义的~\texttt{with-answer} 和~\texttt{with-inference} 宏。
+
+\notei{254}
+
+``未绑定''的模式匹配变量将是~\texttt{nil}，万一这个有所不妥，
+你可以把这些匹配变量绑定到专门的~gensym 上，也就是：
+先~\texttt{(defconstant unbound (gensym))}，再把~\texttt{with-answer} 里的
+\begin{verbatim}
+`(,v (binding ',v ,binds)))
+\end{verbatim}
+这一行换成：
+\begin{verbatim}
+`(,v (aif2 (binding ',v ,binds) it unbound))
+\end{verbatim}
+
+\notei{258}
+  Scheme 由~Guy L. Steele Jr.\index{Steele, Guy Lewis Jr.} 和~Gerald J. Sussman 在~1975 年发明。
+  该语言的定义文件是：Clinger, William\index{Clinger, William}, 和~Jonathan A. Rees\index{Rees, Jonathan A.} (及他人编辑)。
+  \emph{Revised$^4$ Report on the Algorithmic Language Scheme}. 1991.  
+
+  这份报告以及各种~Scheme 实现在本书付梓之时，可由匿
+  名~\textsc{ftp} 在~\texttt{altdorf.ai.mit.edu:pub} 下载到。
+
+\notei{266}
+  下面为第~\ref{chap:macro-defining_macros} 章中介绍的技术再补充个例子，
+  它由~\texttt{=defun} 定义中的~\texttt{defmacro} 模板衍生而来：
+\begin{verbatim}
+(defmacro fun (x)
+  `(=fun *cont* ,x))
+
+(defmacro fun (x)
+  (let ((fn '=fun))
+    `(,fn *cont* ,x)))
+
+`(defmacro ,name ,parms
+   (let ((fn ',f))
+     `(,fn *cont* ,,@parms)))
+
+`(defmacro ,name ,parms
+   `(,',f *cont* ,,@parms))
+\end{verbatim}
+\index{backquote@backquote (\texttt{`}) \bq!nested 嵌套}
+
+\notei{267}
+  如果你希望在 toplevel 看到多重返回值的话，可以改成这样说：
+\begin{verbatim}
+(setq *cont*
+      #'(lambda (&rest args)
+          (if (cdr args) args (car args))))
+\end{verbatim}
+
+\notei{273-1}
+  这个例子基于另一个例子，它来自：Wand, Mitchell.\index{Wand, Mitchell}
+  Continuation-Based Program Transformation Strategies. \emph{JACM} 27, 1
+  (January 1980), pp. 166.
+
+\notei{273-2}
+
+  在这本书里有一个能把~Scheme 代码转换到~continuation-passing style 的程序：
+  Steele, Guy L., Jr.\index{Steele, Guy Lewis Jr.} \emph{\textsc{LAMBDA}: The Ultimate
+  Declarative}. MIT Artificial Intelligence Memo 379, November 1976,
+  pp. 30-38.  
+
+\notei{292}
+  下面的~\texttt{choose} 和~\texttt{fail} 实现在~T 语言\index{T}里会更简
+  洁。T 是~Scheme 的一种方言，它提供了~\texttt{push} 和~\texttt{pop} 操
+  作，而且允许在非~toplevel 的上下文里进行定义：
+
+\begin{verbatim}
+(define *paths* ())
+(define failsym '@)
+
+(define (choose choices)
+  (if (null? choices)
+      (fail)
+      (call-with-current-continuation
+        (lambda (cc)
+          (push *paths*
+                (lambda () (cc (choose (cdr choices)))))
+          (car choices)))))
+
+(call-with-current-continuation
+  (lambda (cc)
+    (define (fail)
+      (if (null? *paths*)
+          (cc failsym)
+          ((pop *paths*))))))
+\end{verbatim}
+\label{note:func:choice-implemented-in-t}
+\index{true-choose@\texttt{true-choose}!breadth-first version!T implementation}
+  欲知~T 语言的具体情况，可参考：Rees, Jonathan A.\index{Rees, Jonathan A.}, Norman
+  I. Adams\index{Adams, Norman I.}, and James R.  Meehan\index{Meehan, James R.}.  \emph{The
+    T Manual}, 5th Edition. Yale University Computer Science
+  Department, New Haven, 1988.
+
+  T 语言参考手册，以及~T 语言本身在本书付梓时，可经由匿
+  名~\textsc{ftp} 在~\texttt{hing.lcs.mit.edu:pub/t3.1} 下载到。
+
+\notei{293}
+  Floyd, Robert W. Nondeterministic
+  Algorithms. \emph{JACM} 14, 4 (October 1967), pp. 636-644.  
+
+\notei{298}
+
+  第~\ref{chap:continuations} 章定义的~continuation-passing 宏相当依赖
+  尾递归调用的优化。如果没有这种优化，这些宏对规模较大的问题就无能为力
+  了。比如说，在本书付印之时，在没有尾递归优化的情况下，几乎没有计算机
+  有足够的内存能用第~\ref{chap:prolog} 章里实现的~Prolog 运行~zebra
+  benchmark\index{zebra benchmark}。\index{tail-recursion optimization 尾递归优化!testing for 检验} (警告：有的~Lisp 在耗尽栈空间的时候会崩溃。)\index{stacks 栈!overflow of}
+  
+\notei{303}
+  通过显式地避免循环路径，来定义一个深度优先的正确 \emph{choose} 是完全可行的。
+  下面是一个~T 语言的实现：
+\begin{verbatim}
+(define *paths* ())
+(define failsym '@)
+(define *choice-pts* (make-symbol-table))
+(define-syntax (true-choose choices)
+  `(choose-fn ,choices ',(generate-symbol t)))
+
+(define (choose-fn choices tag)
+  (if (null? choices)
+      (fail)
+      (call-with-current-continuation
+        (lambda (cc)
+          (push *paths*
+                (lambda () (cc (choose-fn (cdr choices)
+                                          tag))))
+          (if (mem equal? (car choices)
+                          (table-entry *choice-pts* tag))
+              (fail)
+              (car (push (table-entry *choice-pts* tag)
+                         (car choices))))))))
+\end{verbatim}
+\label{func:true-choice}
+\index{true-choose@\texttt{true-choose}!depth-first version}
+  在这个版本里面，\texttt{true-choose} 成了一个宏。(T 语言
+  的~\texttt{define-syntax} 和~\texttt{defmacro} 很相似，只不过宏的名字
+  是放在参数列表的~car 里。) 这个宏将展开成对~\texttt{choose-fn} 的一次
+  调用，\texttt{choose-fn} 与
+  图~\ref{fig:scheme_implementation_of_choose_and_fail} 中定义的深度优
+  先~\texttt{choose} 差不多，区别在于前者另外接受一个~\texttt{tag} 参数
+  以区别出选择点。每一个~\texttt{true-choose} 的返回值都被保存在全局的
+  哈希表~\texttt{*choice-pts*} 中。如果有~\texttt{true-choose} 准备返回
+  一个以前返回过的值，那么它就会失败。不过没有必要修改~\texttt{fail} 本
+  身。我们可以借用一下第~\ref{note:func:choice-implemented-in-t} 页上定
+  义的~\texttt{fail}。
+  
+  这个实现做了一个假设，即路径的长度都是有限的。比如说，这让
+  图~\ref{fig:nondeterministic_search} 中定义的~\texttt{path} 能在
+  图~\ref{fig:a_directed_graph_with_a_loop} 中的有向图，中找到
+  从~\texttt{a} 走~\texttt{e} 到的路径~(不过
+  图~\ref{fig:a_directed_graph_with_a_loop} 中的也可以不是有向图)。但是上面
+  定义的~\texttt{true-choose} 对有无穷搜索空间的问题是无能为力的：
+\begin{verbatim}
+(define (guess x)
+  (guess-iter x 0))
+
+(define (guess-iter x g)
+  (if (= x g)
+      g
+      (guess-iter x (+ g (true-choose '(-1 0 1))))))
+\end{verbatim}
+  
+  使用上面定义的~\texttt{true-choose}，\texttt{(guess $n$)} 只在~$n$ 为
+  非负数的时候才会终止。
+  
+  我们定义正确~\emph{choose} 的方式取决于如何界定选择点。在这个版
+  本中，把所有形式上调用~\texttt{true-choose} 的地方都认作选择点。
+  这样做对于有的应用场合来说可能会有些局限性。比如说，如果~\texttt{two-number} 
+  (第~\pageref{fig:choice_in_a_subroutine} 页) 使用的是这个版本
+  的~\emph{choose}，它就永远不会重复返回相同的一对数字，即使调用它的
+  是不同的函数。这样的行为有可能是我们想要的，也有可能不是，这要视情况
+  而定。
+  
+  请注意，这个版本的实现只是用在编译后的代码里的。在解释的代码中，
+  宏调用会被重复展开，每次都会生成一个新~gensym 过的~tag。
+
+\notei{305}
+  Woods, William A. Transition Network Grammars for Natural Language
+  Analysis.  \emph{CACM} 3, 10 (October 1970), pp. 591-606.
+
+\notei{312}
+  最初的~\textsc{atn} 系统里的操作符是能在子网络里控制和修改栈上的寄存
+  器的。要加入这个特性的并不难，但是我们还有一个更通用的解决方案：就是
+  在附于转移弧上的代码中直接加入一个~lambda 表达式，让这个表达式能应用
+  于寄存器栈。举个例子，如果节点~\texttt{mods}
+  (第~\pageref{fig:sub-network_for_strings_of_modifiers} 页) 把如下代码
+  加入出弧上的代码体的话，
+\begin{verbatim}
+(defnode mods
+  (cat n mods/n
+    ((lambda (regs)
+       (append (butlast regs) (setr a 1 (last regs)))))
+    (setr mods *)))
+\end{verbatim}
+  那么状态顺着这条弧转移的话~(不管走多远)，都会把寄存器~\texttt{a} 的最上面
+  的实例~(也就是在~\textsc{atn} 的顶层网络中遍历时，可见的~\texttt{a}
+  实例) 设置成~\texttt{1}。
+
+\notei{323}
+  
+  如果有必要的话，可以很容易地对这个~Prolog 加以修改，让它能利用现有的
+  事实数据库。方法是把~\emph{choose} 嵌到~\texttt{prove}
+  (第~\pageref{fig:compilation_of_queries}) 里面：
+\begin{verbatim}
+(=defun prove (query binds)
+  (choose
+     (choose-bind b2 (lookup (car query) (cdr query) binds)
+       (=values b2))
+     (choose-bind r *rules*
+       (=funcall r query binds))))
+\end{verbatim}
+
+\notei{325}
+  欲迅速判断一个查询是否会有与之匹配的结果，可以使用下面的宏：
+
+\begin{verbatim}
+(defmacro check (expr)
+  `(block nil
+     (with-inference ,expr
+       (return t))))
+\end{verbatim}
+
+\notei{344}
+  本节中用到的例子是从这本书中的例子转换而来的：
+  Sterling, Leon\index{Sterlin, Leon}, and Ehud Shapiro\index{Shapiro, Ehud}. \emph{The Art of Prolog: Advanced
+  Programming Techniques}. MIT Press, Cambridge, 1986。
+
+\notei{349}
+  Lisp 中的底层概念没有一个明确的称呼，这可能会严重阻碍这门语言
+  的推广。要是有人喊出这样的口号，说“我们要用 C++\index{C++} 因为想做面向对象的编
+  程”，那还说得过去。但如果要说“我们要用 Lisp，因为要做 Lisp 编程”，这听上去
+  就没那么理直气壮。在管事的人听起来，这话像是循环论证。在他们眼中，
+  如果~Lisp 很强大，那么其价值就应该来自某一个简单易懂的理念。多年来，我们试着
+  说服他们，但是收效甚微。长久以来，Lisp 被说成一门“处理列表的
+  语言”\index{list processing}，和用来做“符号计算”\index{symbolic computation 符号计算}的语言，最近又有种说
+  法，称之为“动态语言\index{dynamic languages  动态语言}”。但是这些名字中，没有一个能体现出 Lisp 的精
+  髓，哪怕有一点点沾边。大学里有关编程语言的教科书则把这些名号论斤作
+  价，拆散零售，这些论断极大地误导了读者。
+
+  所有把 Lisp 概括成一个词的尝试终将以失败告终，因为 Lisp 的能力源于它
+  的至少五个或六个特性。在“Lisp 给了我们什么”这个问题前，或许我们应该认
+  一回输，承认只有 \emph{Lisp} 才是唯一准确的答案。
+
+\notei{352}
+  出于效率的考虑，如果第二个参数函数认为序列中有元素是相等
+  的，那么 \texttt{sort} 是不会去保持它们原来次序的。比如说，一个正常
+  的 Common Lisp 实现可能会这样做：
+\begin{verbatim}
+> (let ((v #((2 . a) (3 . b) (1 . c) (1 . d))))
+    (sort (copy-seq v) #'< :key #'car))
+#((1 . D) (1 . C) (2 . A) (3 . B))
+\end{verbatim}
+  可以注意到，其中最前面两个元素的相对次序被颠倒了。 内置
+  的 \texttt{stable-sort}\index{stable-sort@\texttt{stable-sort}} 可以在排序的同时，保持元素原来的先后次序：
+\begin{verbatim}
+> (let ((v #((2 . a) (3 . b) (1 . c) (1 . d))))
+    (stable-sort (copy-seq v) #'< :key #'car))
+#((1 . C) (1 . D) (2 . A) (3 . B))
+\end{verbatim}
+  把 \texttt{sort} 当成 \texttt{stable-sort} 使用是一种常见错误。另一个
+  误区是认为 \texttt{sort} 是非破坏性的。事实上，不管
+  是 \texttt{sort} 还是 \texttt{stable-sort} 都有可能修改它们的排序对象。
+  如果你不希望传入的序列发生变动，那你排序的应该是个拷贝。不
+  过，在 \verb|get-ancestors| 里调用 \verb|stable-sort| 是安全的，因为
+  被排序的列表是新生成的。
+\end{notes}
+
+%%% Local Variables:
+%%% coding: utf-8
+%%% mode: latex
+%%% TeX-master: "onlisp-cn"
+%%% End:

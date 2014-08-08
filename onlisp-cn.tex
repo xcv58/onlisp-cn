@@ -1,0 +1,102 @@
+%!TEX encoding = UTF-8 Unicode
+% $Id: onlisp-cn.tex 11 2011-06-09 06:09:31Z binghe $
+
+%% On Lisp (Chinese Translation)
+%% Translator: Chun Tian (binghe), Kov Chai, and others.
+%% Compiling on TeXlive 2007
+
+%\documentclass[fancyhdr]{ctexbookutf8}
+\documentclass[a4paper,10pt,fleqn]{book}
+\usepackage[hmargin={3cm,2cm}, vmargin={2.5cm,2cm}]{geometry}
+\usepackage{graphics}
+\usepackage{tikz}
+\usetikzlibrary{arrows}
+\usepackage{graphicx}
+\usepackage{subfigure}
+\graphicspath{{./figures/}}
+\usepackage[pdfusetitle=false,
+            pdftitle={On Lisp: Common Lisp 高级编程技术},
+            hyperindex,
+            bookmarksnumbered=true,
+            bookmarksopen=true,
+            breaklinks=true,
+            colorlinks=true]{hyperref}
+\usepackage{onlisp-cn}
+\XeTeXlinebreaklocale "zh"
+\XeTeXlinebreakskip = 0pt plus 1pt minus 0.1pt
+\usepackage{makeidx}
+\makeindex
+
+\begin{document}
+\pagestyle{empty}
+\include{terms}
+
+\frontmatter
+\include{title}
+
+\pagenumbering{roman}
+\include{00-preface-cn}
+\renewcommand{\chaptermark}[1]{%
+              \markboth{#1}{}}%
+\renewcommand{\sectionmark}[1]{\markright{#1}}%
+\pagestyle{preface}
+\include{0-preface}
+\tableofcontents
+\mainmatter
+\pagestyle{main}
+\renewcommand{\chaptermark}[1]{%
+              \markboth{\CJKprechaptername~\thechapter~\CJKchaptername\quad#1}{}}
+\renewcommand{\sectionmark}[1]{\markright{#1}}
+\include{1-the_extensible_language}
+\include{2-functions}
+\include{3-functional_programming}
+\include{4-utility_functions}
+\include{5-returning_functions}
+\include{6-functions_as_representation}
+\include{7-macros}
+\include{8-when_to_use_macros}
+\include{9-variable_capture}
+\include{10-other_macro_pitfalls}
+\include{11-classic_macros}
+\include{12-generalized_variables}
+\include{13-computation_at_compile-time}
+\include{14-anaphoric_macros}
+\include{15-macro_returning_functions}
+\include{16-macro-defining_macros}
+\include{17-read_macros}
+\include{18-destructuring}
+\include{19-a_query_compiler}
+\include{20-continuations}
+\include{21-multiple_processes}
+\include{22-nondeterminism}
+\include{23-parsing_with_atns}
+\include{24-prolog}
+\include{25-object-oriented_lisp}
+
+%% temporary enable the index entry in toc
+\backmatter
+%\appendix
+\refstepcounter{chapter}
+\renewcommand{\chaptermark}[1]{%
+              \markboth{附录}{}}
+\pagestyle{appendix}
+\include{packages}
+
+\renewcommand{\chaptermark}[1]{%
+              \markboth{#1}{}}
+\renewcommand{\sectionmark}[1]{\markright{#1}}
+\pagestyle{notes}
+\include{notes}
+
+\refstepcounter{chapter}
+\cleardoublepage
+\phantomsection  
+\addcontentsline{toc}{chapter}{\indexname}
+\printindex 
+\end{document}
+
+%%% Local Variables:
+%%% coding: utf-8
+%%% mode: latex
+%%% TeX-master: t
+%%% End:

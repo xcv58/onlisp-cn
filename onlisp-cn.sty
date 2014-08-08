@@ -1,0 +1,249 @@
+%!TEX encoding = UTF-8 Unicode
+% $Id: onlisp-cn.sty 18 2014-03-12 22:35:24Z binghe $
+
+\NeedsTeXFormat{LaTeX2e}[2001/06/01]%
+\ProvidesPackage {onlisp-cn}
+\typeout{Document Style Option `onlisp'.} 
+
+\usepackage{indentfirst}
+\usepackage{hanging}
+\usepackage{fancybox}
+\usepackage{fancyvrb}
+\usepackage{titletoc}
+\usepackage{titling}
+\usepackage{amsmath, amsfonts}
+\usepackage[cm-default]{fontspec}
+\usepackage{xunicode, xltxtra}
+\usepackage[PunctStyle=quanjiao]{xeCJK}
+\usepackage{verbatim}
+\usepackage{upquote, textcomp}
+\usepackage{csquotes}
+\usepackage{listings}
+
+\lstset{language=Lisp,
+        %numbers=left,
+        %numbersep=15pt,
+        %numberstyle=\ttfamily\small\color{gray},
+        showstringspaces=false, %% 如果没有加上这个，空格就会变成 ␣
+        basicstyle=\ttfamily,
+        keywordstyle=\color{blue}\ttfamily, %rgb:red,151;green,46;blue,111
+        %identifierstyle=\color{rgb:red,240;green,147;blue,76}\ttfamily,
+        stringstyle=\color{red}\ttfamily,
+        commentstyle=\color{rgb:red,38;green,135;blue,9}\ttfamily,
+        emph={defun,defmacro,defvar},
+        emphstyle=\color{rgb:red,144;green,0;blue,144},
+        mathescape=true,
+        tabsize=8
+}
+
+% not ready to use XeIndex
+%\usepackage{xeindex}
+
+\setmainfont[Mapping=tex-text]{Minion Pro}
+\setromanfont[Mapping=tex-text]{Minion Pro} % Minion
+\setsansfont[Mapping=tex-text]{Myriad Pro} % Myriad
+\setmonofont{Menlo}
+\defaultfontfeatures{Scale=MatchLowercase}
+\setCJKmainfont[Ligatures={Rare},
+                BoldFont={Adobe Heiti Std},
+                ItalicFont={Adobe Kaiti Std}]{Adobe Song Std}
+\setCJKsansfont[Ligatures={Rare}]{Adobe Heiti Std}
+\setCJKmonofont{Adobe Kaiti Std}
+\setCJKfamilyfont{kai}{Adobe Kaiti Std}
+\punctstyle{mixedwidth}
+\renewcommand{\emph}[1]{{\em\large #1}} 
+\newfontfamily\hei[Scale=1.02]{Adobe Heiti Std}
+\renewcommand{\textsc}[1]{{\fontspec{Minion Pro}\scshape #1}}
+
+\let\frenchtext\relax
+\newfontinstance\frfont{Lucida Grande}
+%\usepackage[english,french]{babel}
+\newcommand{\fr}[1]{\frfont #1}
+
+
+% 
+%  title
+%  
+\setlength{\droptitle}{-1.4in}
+\pretitle{\begin{flushleft}\fontspec[Scale=2.0]{Palatino}\Huge\bfseries}
+\posttitle{\end{flushleft}\rule[3ex]{\textwidth}{3pt}\vskip -3ex}
+
+\def\subtitle#1{\gdef\@subtitle{#1}}
+\def\@subtitle{}
+\renewcommand{\maketitlehookb}{% 
+  \raggedleft \Large \bfseries\@subtitle \par%
+  \vskip 3em% 
+}
+% remove date
+\renewcommand\maketitlehookc[1]{}
+\predate{\begin{flushright}\normalsize}
+\postdate{\par\end{flushright}}
+
+% 
+% global layout
+% 
+\frenchspacing
+\widowpenalty=10000
+\setlength\parskip{0pt}
+\renewcommand{\baselinestretch}{1.3}
+
+
+% heading
+\usepackage[sf]{titlesec}
+\renewcommand{\contentsname}{目\hspace{1em}录}
+\renewcommand{\figurename}{图}
+\renewcommand{\indexname}{索\hspace{1em}引}
+\renewcommand{\appendixname}{附\hspace{1em}录}
+\newcommand\CJKprechaptername{第}
+\newcommand\CJKchaptername{章}
+\renewcommand\chaptername{\CJKprechaptername~\thechapter~\CJKchaptername}
+\titlespacing{\chapter}{0pt}{0pt}{7ex}
+
+\titleformat{\chapter}[display]
+            {\normalfont\LARGE\sf\bfseries}
+            {\filleft\chaptername}
+            {1ex}
+            {\titlerule\vspace{.5ex}\filright}
+            [\vspace{1ex}]
+\titleformat{\section}[hang]
+            {\Large\sf\bfseries}
+            {\thesection}
+            {1em}
+            {}
+
+%  running heads
+\usepackage{fancyhdr}
+
+\pagestyle{fancy}
+\renewcommand{\chaptermark}[1]{%
+              \markboth{\CJKprechaptername~\thechapter~\CJKchaptername\quad#1}{}}
+\renewcommand{\sectionmark}[1]{\markright{#1}}
+\fancyhf{}
+\addtolength{\headheight}{2.5pt}
+
+\fancypagestyle{preface}{%
+\fancyhf{}
+\fancyhead[CO,CE]{\CJKfamily{kai}\leftmark}%
+\fancyhead[RO,LE]{\thepage}
+}
+
+\fancypagestyle{main}{%
+\fancyhf{}
+% \renewcommand{\headrulewidth}{0pt} 
+%\fancyhead[RO,LE]{\sectionformat}
+\fancyhead[CO]{\CJKfamily{kai}\rightmark}
+\fancyhead[LO]{\CJKfamily{kai}\thesection}
+\fancyhead[CE]{\CJKfamily{kai}\leftmark}
+\fancyhead[RO,LE]{\thepage}
+\addtolength{\headheight}{2.5pt}}
+
+\fancypagestyle{appendix}{%
+\fancyhead[CO]{\CJKfamily{kai}包~(packages)}}
+
+\fancypagestyle{notes}{%
+\fancyhf{}
+\fancyhead[CO,CE]{\CJKfamily{kai}\leftmark}
+\fancyhead[RO,LE]{\thepage}}
+
+
+% toc
+\titlecontents{chapter}[0em]
+              {\addvspace{1.5em}\bfseries}
+              {\CJKprechaptername~\thecontentslabel~\CJKchaptername\quad}
+              {}
+              {\titlerule*[0.4pc]{.}\contentspage}
+\titlecontents{section}[4em]
+              {\small\addvspace{-0.2em}}
+              {\contentslabel{3em}}
+              {}
+              {\titlerule*[0.4pc]{.}\contentspage}
+
+%
+% notes
+% circle in margin
+%
+\addtolength{\marginparsep}{3pt}
+\newcommand\bubblenote{%
+\mbox{}\marginpar[\raggedleft\hspace{0pt}$\circ$]{\hspace{0pt}$\circ$}}
+\newcommand\note[1]{\label{note:#1}\mbox{}
+  \marginpar[\raggedleft\hspace{0pt}$\circ$]{\hspace{0pt}\hyperlink{notes.#1}{$\circ$}}}
+% \newcommand\note[1]{\label{note:#1}\mbox{}
+%   \marginpar[\raggedleft\hspace{0pt}$\circ$]{\hspace{0pt}$\circ$}}
+
+\newenvironment{notes}
+{\list{}{
+    \setlength{\labelsep}{.5em}
+    \advance\leftmargin by \labelwidth
+    \let\makelabel\notelabel}}
+{\endlist}
+\newcommand{\notelabel}[1]{\hfill\normalfont\bfseries#1}
+%% \newcommand{\notei}[1]{\item[\pageref{note:#1}]}
+\newcommand{\notei}[1]{\item[\pageref{note:#1}]\hypertarget{notes.#1}{}}
+
+\def\seename{参见}
+\def\alsoname{亦可见}
+
+% beautiful but not copy-able.
+\newcommand{\pozhehao}{\kern0.3ex\rule[.2\baselineskip]{1.7em}{.4pt}\kern0.3ex}
+
+% slightly ugly when displayed but can be pasted as "---"
+%\newdimen\ccwd
+%\newcommand{\pozhehao}{{\settowidth\ccwd{—}—\kern-0.5\ccwd—\kern-0.5\ccwd—}}
+
+%\renewcommand{\labelenumii}{(\alph{enumii})}
+
+\newlength\CJKtwochars
+\settowidth{\CJKtwochars}{XXX}
+\setlength{\parindent}{\CJKtwochars}
+\def\CJKindent{
+   \parindent\CJKtwochars
+}
+
+% 用方框包围的图片环境，使用了 fancybox 包
+\setlength{\fboxrule}{.05em}
+\newlength \figurewidth
+\setlength{\abovecaptionskip}{0pt}
+
+\renewenvironment{figure}%
+{\@float{figure}[h!t]
+  \setlength{\fboxsep}{.8em}%
+  \begin{Sbox}%
+    \setlength{\figurewidth}{\textwidth}%
+    \addtolength{\figurewidth}{-2\fboxsep}%
+    \addtolength{\figurewidth}{-2\fboxrule}%
+    \begin{minipage}{\figurewidth}}%
+   {\end{minipage}%
+ \end{Sbox}%
+ \fbox{\TheSbox}%
+\end@float}
+
+\newcommand\define[1]{%
+  \par
+  \vspace{.2\baselineskip}
+  \hangpara{1.96cm}{1}\textsl{#1}：\unskip
+  \vspace{.2\baselineskip}
+}
+
+\newenvironment{defineit}[1]{%
+  \bigskip
+  \begin{hangparas}{8ex}{1}\textsl{#1}：}%
+ {\end{hangparas}\bigskip}
+
+\newcommand\prule[2]{%
+  \begin{tabbing}
+    If\hspace{2em}\={#1}\\
+    Then\>{#2}
+  \end{tabbing}
+}
+%%\DefineVerbatimEnvironment{verbatim}{Verbatim}{commandchars=\\\{\},codes={\catcode`$=3\catcode`^=7\catcode=`\_=8},baselinestretch=1.0}
+\DefineVerbatimEnvironment{verbatim}{Verbatim}
+        {commandchars=§\{\},
+                codes={\catcode`$=3\catcode`^=7},baselinestretch=1.0}
+\DefineVerbatimEnvironment{lisp}{Verbatim}
+        {commandchars=§\¤\ø,
+                codes={\catcode`$=3\catcode`^=7},baselinestretch=1.0}
+
+\newcommand{\apostrophe}{\XeTeXglyph\XeTeXcharglyph"0027\relax}
+\newcommand{\backquote}{\XeTeXglyph\XeTeXcharglyph"0060\relax}
+
+\endinput

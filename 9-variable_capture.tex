@@ -1,0 +1,604 @@
+%!TEX encoding = UTF-8 Unicode
+% $Id: 9-variable_capture.tex 18 2014-03-12 22:35:24Z binghe $
+
+\chapter{变量捕捉}
+\label{chap:variable_capture}
+\index{capture 捕捉}
+
+宏很容易遇到一类被称为\emph{变量捕捉}\index{variable capture 变量捕捉|see {capture}}%
+的问题。变量捕捉发生在宏展开导致名字冲突的时候，名字冲突指：某些符号结果出乎意料
+地引用了来自另一个上下文中的变量。无意的变量捕捉可能会造成极难发觉的
+~bug\index{macros 宏!errors in|see {capture}}。
+本章将介绍预见和避免它们的办法。不过，有意的变量捕捉却也是一种有用的
+编程技术，而且第~\ref{chap:anaphoric_macros} 章的宏都是靠这种技术实现的。
+
+\section{宏参数捕捉}
+\label{sec:macro_argument_capture}
+\index{capture 捕捉!macro argument capture 宏参数捕捉}
+
+如果一个宏对无意识的变量捕捉毫无防备，那么它就是有~bug 的宏。为了避免写出这样的宏，
+我们必须确切地知道捕捉发生的时机。变量捕捉可以分为两类情况：
+宏参数捕捉和自由符号捕捉。所谓参数捕捉，就是在宏调用中作为参数传递的符号无意地
+引用到了宏展开式本身建立的变量。考虑下面这个~\texttt{for} 宏的定义，它像
+~Pascal 的 \texttt{for} 在一系列表达式上循环操作：
+\begin{lstlisting}
+(defmacro for ((var start stop) &body body)
+  `(do ((,var ,start (1+ ,var))
+        (limit ,stop))
+       ((> ,var limit))
+     ,@body))
+\end{lstlisting}
+这个宏乍看之下没有问题。它甚至似乎也可以正常工作：
+\begin{lstlisting}
+> (for (x 1 5)
+    (princ x))
+12345
+NIL
+\end{lstlisting}
+确实，这个错误如此隐蔽，可能用上这个版本的宏数百次，都毫无问题。
+但如果我们这样调用它，问题就出来了：
+\begin{lstlisting}
+(for (limit 1 5)
+  (princ limit))
+\end{lstlisting}
+我们可能会认为这个表达式和之前的结果相同。但它却没有任何输出：它产生了
+一个错误。为了找到原因，我们仔细观察它的展开式：
+\begin{lstlisting}
+(do ((limit 1 (1+ limit))
+     (limit 5))
+    ((> limit limit))
+  (print limit))
+\end{lstlisting}
+现在错误的地方就很明显了。在宏展开式本身的符号和作为参数传递给宏的符号之间出现
+了名字冲突。宏展开\emph{捕捉}了~\texttt{limit}。这导致它在同一个~\texttt{do}
+里出现了两次，而这是非法的。
+
+由变量捕捉导致的错误比较罕见，但频率越低其性质就越恶劣。上个捕捉相对还比较温
+和\pozhehao{}至少这次我们得到了一个错误。更普遍的情况是，捕捉了变量的宏
+只是产生错误的结果，却没有给出任何迹象显示问题的源头。在下面的例子中，
+\begin{lstlisting}
+> (let ((limit 5))
+    (for (i 1 10)
+      (when (> i limit)
+        (princ i))))
+NIL
+\end{lstlisting}
+产生的代码静悄悄地什么也不做。\label{example:capture}
+
+\section{自由符号捕捉}
+\label{sec:free_symbol_capture}
+\index{capture 捕捉!free symbol capture 自由符号捕捉}
+
+偶尔会出现这样的情况，宏定义本身有这么一些符号，它们在宏展开时无意中却引用到了
+其所在环境中的绑定。假设有个程序，它希望把运行中产生的警告信息保存在一个列表里
+供事后检查，而不是在问题发生时直接打印输出给用户。于是有人写了一个宏
+~\texttt{gripe}\label{macro:gripe}，它接受一个警告信息，并把它加入全局列表
+~\texttt{w}：
+\begin{lstlisting}[escapechar=\~]
+(defvar w nil)
+
+(defmacro gripe (warning)       ~\hfill~; wrong
+  `(progn (setq w (nconc w (list ,warning)))
+          nil))
+\end{lstlisting}
+之后，另一个人希望写个函数~\texttt{sample-ratio}，用来返回两个列表的长度比。如
+果任何一个列表中的元素少于两个，函数就改为返回~\texttt{nil}，同时产生一个警告说
+明这个函数处理的是一个统计学上没有意义的样本。(实际的警告本可以带有更多的信
+息，但它们的内容与本例无关。)
+\begin{lstlisting}
+(defun sample-ratio (v w)
+  (let ((vn (length v)) (wn (length w)))
+    (if (or (< vn 2) (< wn 2))
+        (gripe "sample < 2")
+        (/ vn wn))))
+\end{lstlisting}
+如果用~\texttt{w = (b)} 来调用~\texttt{sample-ratio}，那么它将会警告说它有个
+参数只含一个元素，因而得出的结果从统计上来讲是无意义的。但是当对~\texttt{gripe} 的调用被展开
+时，\texttt{sample-ratio} 就好像被定义成：
+\begin{lstlisting}
+(defun sample-ratio (v w)
+  (let ((vn (length v)) (wn (length w)))
+    (if (or (< vn 2) (< wn 2))
+        (progn (setq w (nconc w (list "sample < 2")))
+               nil)
+        (/ vn wn))))
+\end{lstlisting}
+这里的问题是，使用~\texttt{gripe} 时的上下文含有~\texttt{w} 自己的局部绑定。所以，
+产生的警告没能保存到全局的警告列表里，而是被~\texttt{nconc} 连接到了
+~\texttt{sample-ratio} 的一个参数的结尾。不但警告丢失了，而且列表~\texttt{(b)}
+也加上了一个多余的字符串，而程序的其他地方可能还会把它作为数据继续使用：
+\begin{lstlisting}
+> (let ((lst '(b)))
+    (sample-ratio nil lst)
+    lst)
+(B "sample < 2")
+> w
+NIL
+\end{lstlisting}
+
+\section{捕捉发生的时机}
+\label{sec:when_capture_occurs}
+
+许多宏的编写者都希望通过查看宏的定义，就可以预见到所有可能来自上述两种捕捉类型
+的问题。变量捕捉有些难以捉摸，需要一些经验才能预料到那些被捕捉的变量在程序中
+所有捣乱的伎俩。幸运的是，还是有办法在你的宏定义中找出那些可能被捕捉的符号\index{capture 捕捉!detecting potential}，并排除它们的，
+而无需操心这些符号捕捉\emph{如何}搞砸你的程序。本节将介绍一套直接了当的检测原则，
+用它就可以找出可捕捉的符号。本章的其余部分则解释了避免出现变量捕捉的相关技术。
+
+我们接下来提出的方法可以用来定义可捕捉的变量，但是它基于几个从属的概念，所以
+在继续之前必须首先给这些概念下个定义：
+
+\begin{defineit}{自由~(free)}\index{variables 变量!free 自由}
+我们认为表达式中的符号~\emph{s} 是自由的，当且仅当它
+被用作表达式中的变量，但表达式却没有为它创建一个绑定。
+\end{defineit}
+
+在下列表达式里，
+\begin{lstlisting}
+(let ((x y) (z 10))
+  (list w x z))
+\end{lstlisting}
+\texttt{w}, \texttt{x} 和~\texttt{z} 在~\texttt{list} 表达式中看上去都是自由的，
+因为这个表达式没有建立任何绑定。不过，外围的~\texttt{let} 表达式为~\texttt{x} 和
+~\texttt{z} 创建了绑定，从整体上说，在~\texttt{let} 里面，只有~\texttt{y} 和
+~\texttt{w} 是自由的。注意到在
+\begin{lstlisting}
+(let ((x x))
+  x)
+\end{lstlisting}
+里~\texttt{x} 的第二个实例是自由的\pozhehao{}因为它并不在为~\texttt{x} 创建的新绑定
+的作用域内。
+
+\begin{defineit}{框架~(skeleton)}\index{macros 宏!skeletons of}
+宏展开式的框架是整个展开式，并且去掉任何在宏调用中作为实参的部分。
+\end{defineit}
+
+如果~\texttt{foo} 的定义是：
+\begin{lstlisting}
+(defmacro foo (x y)
+  `(/ (+ ,x 1) ,y))
+\end{lstlisting}
+并且被这样调用：
+\begin{lstlisting}
+(foo (- 5 2) 6)
+\end{lstlisting}
+那么它就会产生如下的展开式：
+\begin{lstlisting}
+(/ (+ (- 5 2) 1) 6)
+\end{lstlisting}
+这一展开式的框架就是上面这个表达式在把形参~\texttt{x} 和~\texttt{y} 拿走，留下空白
+后的样子：
+\begin{lstlisting}
+(/ (+         1)  )
+\end{lstlisting}
+
+有了这两个概念，就可以把判断可捕捉符号的方法简单表述如下：
+
+\begin{defineit}{可捕捉~(capturable)}
+如果一个符号满足下面条件之一，那就可以认为它在某些宏展开里是可捕捉的：(a)
+它作为自由符号出现在宏展开式的框架里，或者~(b) 它被绑定到框架的一部分，而该框架中
+含有传递给宏的参数，这些参数被绑定或被求值。
+\end{defineit}
+
+用些例子可以明确这个标准的含义。在最简单的情况下：
+\begin{lstlisting}
+(defmacro cap1 ()
+  '(+ x 1))
+\end{lstlisting}
+\texttt{x} 可被捕捉是因为它作为自由符号出现在框架里。 这就是导致~\texttt{gripe}
+中~bug 的原因。在这个宏里：
+\begin{lstlisting}
+(defmacro cap2 (var)
+  `(let ((x ...)
+         (,var ...))
+     ...))
+\end{lstlisting}
+\texttt{x} 可被捕捉是因为它被绑定在一个表达式里，而同时也有一个宏调用的参数被绑定了。
+(这就是~\texttt{for} 中出现的错误。) 同样对于下面两个宏：
+\begin{lstlisting}
+(defmacro cap3 (var)
+  `(let ((x ...))
+     (let ((,var ...))
+       ...)))
+
+(defmacro cap4 (var)
+  `(let ((,var ...))
+     (let ((x ...))
+       ...)))
+\end{lstlisting}
+\texttt{x} 在两个宏里都是可捕捉的。然而，如果~\texttt{x} 的绑定和作为参数传递的变量
+没有这样一个上下文，在这个上下文中，两者是同时可见的，就像在这个宏里：
+\begin{lstlisting}
+(defmacro safe1 (var)
+  `(progn (let ((x 1))
+            (print x))
+          (let ((,var 1))
+            (print ,var))))
+\end{lstlisting}
+那么~\texttt{x} 将不会被捕捉到。并非所有绑定在框架里的变量都是有风险的。尽管如此，如果宏
+调用的参数在一个由框架建立的绑定里被求值，
+\begin{lstlisting}
+(defmacro cap5 (&body body)
+  `(let ((x ...))
+     ,@body))
+\end{lstlisting}
+那么，这样绑定的变量就有被捕捉的风险：在~\verb|cap5| 中，\verb|x| 是可捕捉的。不过
+对于下面这种情况，
+\begin{lstlisting}
+(defmacro safe2 (expr)
+  `(let ((x ,expr))
+     (cons x 1)))
+\end{lstlisting}
+\texttt{x} 是不可捕捉的，因为当传给~\verb|expr| 的参数被求值时，\verb|x| 的新绑定
+将是不可见的。同时，请注意我们只需关心那些框架变量的绑定。在这个宏里
+\begin{lstlisting}
+(defmacro safe3 (var &body body)
+  `(let ((,var ...))
+     ,@body))
+\end{lstlisting}
+没有符号会因没有防备而被捕捉~(假设第一个参数的绑定是用户有意为之)。
+
+现在让我们来检查一下~\texttt{for} 最初的定义，看看使用新的规则是否能发现可捕捉的符号：
+\begin{lstlisting}[escapechar=\~]
+(defmacro for ((var start stop) &body body)             ~\hfill~; wrong
+  `(do ((,var ,start (1+ ,var))
+        (limit ,stop))
+       ((> ,var limit))
+     ,@body))
+\end{lstlisting}
+现在可以看出~\texttt{for} 的这一定义可能遭受\emph{两种}方式的捕捉：\texttt{limit}
+可能会被作为第一个参数传给~\texttt{for}，就像在最早的例子里那样：
+\begin{lstlisting}
+(for (limit 1 5)
+  (princ limit))
+\end{lstlisting}
+但是，如果~\texttt{limit} 出现在循环体里，也同样危险：
+\begin{lstlisting}
+(let ((limit 0))
+  (for (x 1 10)
+    (incf limit x))
+  limit)
+\end{lstlisting}
+这样用~\texttt{for} 的人，可能会期望他自己的~\texttt{limit} 绑定就是在循环里
+递增的那个，最后整个表达式返回~55；事实上，只有那个由展开式框架生成的~\texttt{limit}
+绑定会递增：
+\begin{lstlisting}
+(do ((x 1 (1+ x))
+     (limit 10))
+    ((> x limit))
+  (incf limit x))
+\end{lstlisting}
+并且，由于迭代过程是由这个变量控制的，所以循环甚至将无法终止。
+
+本节中介绍的这些规则不过是个参考，在实际编程中仅仅具有指导意义。它们甚至不是形式化定义的，
+更不能完全保证其正确性。捕捉是一个不能明确定义的问题，它依赖于你期望的行为。例如，在下面的表达式里，
+\begin{lstlisting}
+(let ((x 1)) (list x))
+\end{lstlisting}
+\texttt{x} 在 \texttt{(list x)} 被求值时，会指向新的变量，不过我们不会把它视为错误。这正是
+~\texttt{let} 要做的事。检测捕捉的规则也含混不清。你可以写出通过这些测试的宏，而这样的宏
+却仍然有可能会遭受意料之外的捕捉。例如，
+\begin{lstlisting}[escapechar=\~]
+(defmacro pathological (&body body)                     ~\hfill~; wrong
+  (let* ((syms (remove-if (complement #'symbolp)
+                          (flatten body)))
+         (var (nth (random (length syms))
+                   syms)))
+    `(let ((,var 99))
+       ,@body)))
+\end{lstlisting}
+当调用这个宏的时候，宏主体中的表达式就像是在一个~\texttt{progn} 中被求值\pozhehao{}
+但是主体中有一个随机选出的变量将带有一个不同的值。这很明显是一个捕捉，但它通过了我们的测试，
+因为这个变量并没有出现在框架里。然而，实践表明该规则在绝大多数时候都是正确的：很少有人
+~(如果真有的话) 会想写出类似上面那个例子的宏。
+
+\section{取更好的名字避免捕捉}
+\label{sec:avoiding_capture_with_better_names}
+
+前两节将变量捕捉分为两类：参数捕捉，在这种情况下，由宏框架建立的绑定会捕捉参数中用到的符号；
+和自由符号捕捉，而在这里，宏展开处的绑定会捕捉到宏展开式中的自由符号。
+常常可以通过给全局变量取个明显的名字来解决后一类问题\index{capture 捕捉!free symbol capture 自由符号捕捉!avoiding 避免}。在~Common Lisp 中，习惯上会给全局变量\index{variables 变量!global 全局}取一个两头都是星号的名字。例如，定义当前包的变量叫做~\texttt{package}\index{package@\texttt{*package*}}。(这样的名字可以发音为~``star--package--star'' 来强调它不是普通的变量。)
+
+所以~\texttt{gripe} 的作者的的确确有责任把那些警告保存在一个名字类似~\texttt{*warnings*} 而非~\texttt{w} 的变量中。
+如果~\texttt{sample-ratio} 的作者执意要用~\texttt{*warnings*} 做函数参数，那他碰到的每个~bug 都是咎由自取，但如果他觉得用
+~\texttt{w} 作为参数的名字应该比较保险，就不应该再怪他了。
+
+\section{通过预先求值避免捕捉}
+\label{sec:avoiding_capture_by_prior_evaluation}
+\index{capture 捕捉!avoiding by prior evaluation}
+
+\begin{figure}
+易于被捕捉的：
+\begin{lstlisting}
+(defmacro before (x y seq)
+  `(let ((seq ,seq))
+     (< (position ,x seq)
+        (position ,y seq))))
+\end{lstlisting}
+一个正确的版本：
+\begin{lstlisting}
+(defmacro before (x y seq)
+  `(let ((xval ,x) (yval ,y) (seq ,seq))
+     (< (position xval seq)
+        (position yval seq))))
+\end{lstlisting}
+\caption{\label{fig:avoiding_capture_with_let}用~\texttt{let} 避免捕捉}
+\end{figure}
+
+有时，如果不在任何宏展开创建的绑定里求值那些有危险的参数，就可以轻松消除参数捕捉。
+最简单的情况可以这样处理：让宏以~\texttt{let} 表达式开头。图
+~\ref{fig:avoiding_capture_with_let} 包含宏~\texttt{before} 的两个版本，该宏接受
+两个对象和一个序列，当且仅当第一个对象在序列中出现于第二个对象之前时返回真。\footnote{%
+这个宏只是个例子。实际编程中，它既不应当实现成宏，也不该用这种低效的算法。若需要正确的定义，可见
+第~\pageref{fig:functions_which_search_lists} 页。}
+第一个定义是不正确的。它开始的~\texttt{let} 确保了作为~\texttt{seq} 传递的~form
+只求值一次，但是它不能有效地避免下面这个问题：
+\begin{lstlisting}
+> (before (progn (setq seq '(b a)) 'a)
+          'b
+          '(a b))
+NIL
+\end{lstlisting}
+这相当于问“\texttt{(a b)} 中的~\verb|a| 是否在~\verb|b| 前面？”如果
+~\verb|before| 是正确的，它将返回真。宏展开式揭示了真相：对~\verb|<| 的
+第一个参数的求值重新排列了那个将在第二个参数里被搜索的列表。
+\begin{lstlisting}
+(let ((seq '(a b)))
+  (< (position (progn (setq seq '(b a)) 'a)
+               seq)
+     (position 'b seq)))
+\end{lstlisting}
+要想避免这个问题，只要在一个巨大的~\texttt{let} 里求值所有参数就行了。这样图
+~\ref{fig:avoiding_capture_with_let} 中的第二个定义对于捕捉就是安全的了。
+
+不幸的是，这种~\texttt{let} 技术只能在很有限的一类情况下才可行：
+\begin{enumerate}
+\item 所有可能被捕捉的参数都只求值一次，并且
+\item 没有一个参数需要在宏框架建立的绑定下被求值。
+\end{enumerate}
+这个规则排除了相当多的宏。我们比较赞成的~\texttt{for} 宏就同时违反了这两个限制。然而，
+我们可以把这个技术加以变化，使类似~\texttt{for} 的宏免于发生捕捉，即将其~\texttt{body} forms 
+包装在一个\lexpr{}里，同时让这个\lexpr{}位于任何局部创建的绑定之外。
+
+有些宏~(其中包括用于迭代的宏)，如果宏调用里面有表达式出现，那么在宏展开
+后，这些表达式将会在一个新建的绑定中求值。例如在~\texttt{for} 的定义
+中，循环体必须在一个由宏创建的~\texttt{do} 中进行求值。因
+此，\texttt{do} 创建的变量绑定会很容易就捕捉到循环里的变量。我们可以把
+循环体包在一个闭包里，同时在循环里，不再把直接插入表达式，而只是简单
+地~funcall 这个闭包。通过这种办法来保护循环中的变量不被捕捉。
+
+\begin{figure}
+易于被捕捉的：
+\begin{lstlisting}
+(defmacro for ((var start stop) &body body)
+  `(do ((,var ,start (1+ ,var))
+        (limit ,stop))
+       ((> ,var limit))
+     ,@body))
+\end{lstlisting}
+正确的版本：
+\begin{lstlisting}
+(defmacro for ((var start stop) &body body)
+  `(do ((b #'(lambda (,var) ,@body))
+        (count ,start (1+ count))
+        (limit ,stop))
+       ((> count limit))
+     (funcall b count)))
+\end{lstlisting}
+  \caption{用闭包避免捕捉}
+  \label{fig:avoiding_capture_with_closure}
+\end{figure}
+
+图~\ref{fig:avoiding_capture_with_closure} 给出了一个~\texttt{for} 的实现，它使用的就是这种技术\note{126}。
+由于闭包是~\texttt{for} 展开时生成的第一个东西，因此，所有出现在宏体内的自由符号将全部指向
+宏调用环境中的变量。现在~\texttt{do} 通过闭包的参数跟宏体通信。闭包需要从~\texttt{do}
+知道的全部就是当前迭代的数字，所以它只有一个参数，也就是宏调用中作为索引指定的那个符号。
+
+这种将表达式包装进~lambda 的方法也不是万金油。虽然你可以用它来保护代码体，但闭包有时也
+起不到任何作用，例如，当存在同一变量在同一个~\texttt{let} 或~\texttt{do} 里被绑定两次
+的风险时~(就像开始的那个有缺陷的~\texttt{for} 那样)。幸运的是，在这种情况下，通过重写
+~\texttt{for} 将其主体包装在一个闭包里，我们同时也消除了~\texttt{do} 为~\texttt{var}
+参数建立绑定的需要。原先那个~\texttt{for} 中的~\texttt{var} 参数变成了闭包的参数并且在
+~\texttt{do} 里面可以被一个实际的符号~\texttt{count} 替换掉。所以这个~\texttt{for}
+的新定义对于捕捉是完全免疫的，就像~\ref{sec:when_capture_occurs} 节里的测试所显示的那
+样。
+
+闭包的缺点在于，它们的效率可能不大理想。我们可能会因此造成又一次函数调用。更糟糕的是，如果
+编译器没有给闭包分配动态作用域~(dynamic extent)\index{dynamic extent 动态作用域}\index{extent, dynamic}，
+那么一等到运行期，闭包所需的空间将不得不从堆里分配。
+\footnote{译者注：dynamic extent 是一种~Lisp 编译器优化技术，详情请见
+~\href{http://www.lisp.org/HyperSpec/Body/dec_dynamic-extent.html\#dynamic-extent}{Common Lisp HyperSpec} 的有关内容。}
+
+\section{通过~gensym 避免捕捉}
+\label{sec:avoiding_capture_with_gensyms}
+\index{capture 捕捉!avoiding with gensyms}
+
+这里有一种切实可行的方法可供避免宏参数捕捉：把可捕捉的符号换成~gensym。在
+~\texttt{for} 的最初版本中，当两个符号意外地重名时，就会出问题。如果我们想要避免这种情况：宏框架里
+含有的符号也同时出现在了调用方代码里，我们也许会给宏定义里的符号取个怪异的名字，寄希望以此来摆
+脱参数捕捉的魔爪：
+\begin{lstlisting}[escapechar=\~]
+(defmacro for ((var start stop) &body body)             ~\hfill~; wrong
+  `(do ((,var ,start (1+ ,var))
+        (xsf2jsh ,stop))
+       ((> ,var xsf2jsh))
+     ,@body))
+\end{lstlisting}
+但是这治标不治本。它并没有消除~bug，只是降低了出问题的可能性。并且还有一个可能性不那么小的问题悬而未决
+\pozhehao{}不难想象，如果把同一个宏嵌套使用的话，仍会出现名字冲突。
+
+我们需要一个办法来\emph{确保}符号都是唯一的。Common Lisp 函数~\texttt{gensym}\index{gensym@\texttt{gensym}}
+的意义正是在于此。\note{128}它返回的符号称为~\emph{gensym}，这个符号可以保证不和任何手工
+输入或者由程序生成的符号相等（\texttt{eq}）。
+
+那 Lisp 是如何保证这一点的呢？在~Common Lisp 中，每个包都维护着一个列表，用于保存这个包知道的所有符号。
+(关于包~(package) 的介绍，可见~\pageref{chap:packages} 页。) 一个符号，只要出现在这个列表上，
+我们就说它被\emph{\intern~(intern)}\index{intern@\texttt{intern}} 在这个包里。每次调用~\texttt{gensym} 都会
+返回唯一，\unintern{}的符号。而~\texttt{read}\index{read@\texttt{read}} 每见到一个符号，都会把它\intern{}\index{interning}，
+所以没人能输入和~gensym 相同的东西。也就是说，如果你有个表达式是这样开头的
+\begin{lstlisting}
+(eq (gensym) ...
+\end{lstlisting}
+那么将无法让这个表达式返回真。
+
+让~\texttt{gensym} 为你构造符号，这个办法其实和``选个怪名字''的方法异曲同工，而且更进一步
+\pozhehao{}\texttt{gensym} 给你的名字甚至在电话薄里也找不到。如果~Lisp 不得不显示~gensym，
+\begin{lstlisting}
+> (gensym)
+#:G47
+\end{lstlisting}
+它打印出来的东西基本上就相当于~Lisp 的“张三”，即为那种名字无关紧要的东西
+编造出来的毫无意义的名字。并且为了确保我们不会对此有任何误会，gensym 在显示时候，前面加了一个井号--%
+冒号\index{\#:@\texttt{\#:}}，这是一种特殊的读取宏~(read--macro)，其目的是为了让我们在试图第二次读取该~gensym 时报错。
+
+在~\textsc{cltl}2 Common Lisp 里，gensym 的打印形式\index{print-names}\index{symbols 符号!names of}中的数字来自
+~\texttt{*gensym-counter*}\index{gensym-counter@\texttt{*gensym-counter*}}\index{Common Lisp!differences between versions!*gensym-counter*@\texttt{*gensym-counter*}}，这个全局变量总是绑定到某个整数。如果重置这个计数器，我们就可以让两个~gensym 的打印输出一模一样
+\begin{lstlisting}
+> (setq x (gensym))
+#:G48
+> (setq *gensym-counter* 48 y (gensym))
+#:G48
+> (eq x y)
+NIL
+\end{lstlisting}
+但它们不是一回事。
+
+\begin{figure}
+易于被捕捉的：
+\begin{lstlisting}
+(defmacro for ((var start stop) &body body)
+  `(do ((,var ,start (1+ ,var))
+        (limit ,stop))
+       ((> ,var limit))
+     ,@body))
+\end{lstlisting}
+一个正确的版本：
+\begin{lstlisting}
+(defmacro for ((var start stop) &body body)
+  (let ((gstop (gensym)))
+    `(do ((,var ,start (1+ ,var))
+          (,gstop ,stop))
+         ((> ,var ,gstop))
+       ,@body)))
+\end{lstlisting}
+\caption{\label{fig:avoiding_capture_with_gensym}用~gensym 避免捕捉}
+\end{figure}
+
+图~\ref{fig:avoiding_capture_with_gensym} 中有一个使用~gensym 的~\verb|for|
+的正确定义。现在就没有~\verb|limit| 可以和传进宏的~form 里的符号有冲突了。它已经被
+换成一个在现场生成的符号。宏每次展开的时候，\verb|limit| 都会被一个在展开期
+创建的唯一符号取代。
+
+初次就把~\verb|for|\label{macro:for} 定义得完美无缺，还是很难的。
+完成后的代码，如同一个完成了的定理，精巧漂亮的证明的背后是一次次的尝试和失败。
+所以不要担心你可能会对一个宏写好几个版本。在开始写类似
+~\texttt{for} 这样的宏时，你可以在不考虑变量捕捉问题的情况下，先把第一个版本写出来，然后再回过头来
+为那些可能卷入捕捉的符号制作~gensym。
+
+\section{通过包避免捕捉}
+\label{sec:avoiding_capture_with_packages}
+\index{capture 捕捉!avoiding with packages}
+\index{packages!avoiding capture with}
+
+从某种程度上说，如果把宏定义在它们自己的包里，就有可能避免捕捉。倘若你创建一个
+~\texttt{macros} 包，并且在其中定义~\texttt{for}，那么你甚至可以使用最初给出的定义
+\begin{lstlisting}
+(defmacro for ((var start stop) &body body)
+  `(do ((,var ,start (1+ ,var))
+        (limit ,stop))
+       ((> ,var limit))
+     ,@body))
+\end{lstlisting}
+这样，就可以毫无顾虑地从其他任何包调用它。如果你从另一个包，比方说~\texttt{mycode}，里调用
+~\texttt{for}，就算把~\texttt{limit} 作为第一个参数，它也是
+\texttt{mycode::limit}\pozhehao{}
+这和~\texttt{macros::limit} 是两回事，后者才是出现在宏框架中的符号。
+
+然而，包还是没能为捕捉问题提供面面俱到的通用解决方案。首先，宏是某些程序不可或缺
+的组成部分，将它们从自己的包里分离出来会很不方便。其次，这种方法无法为~\texttt{macros}
+包里的其他代码提供任何捕捉保护。
+
+\section{其他名字空间里的捕捉}
+\label{sec:capture_in_other_name-spaces}
+
+前面几节都把捕捉说成是一种仅影响变量的问题。尽管多数捕捉都是变量捕捉，但是
+~\texttt{Common Lisp} 的其他名字空间里也同样会有这种问题。
+
+函数也可能在局部被绑定，因而，函数绑定也会因无意的捕捉而导致问题。例如，
+\begin{lstlisting}
+> (defun fn (x) (+ x 1))
+FN
+> (defmacro mac (x) `(fn ,x))
+MAC
+> (mac 10)
+11
+> (labels ((fn (y) (- y 1)))
+    (mac 10))
+9
+\end{lstlisting}
+正如捕捉规则预料的那样，以自由之身出现在~\verb|mac| 框架中的~\verb|fn| 带来了被捕捉的风险。如果
+~\verb|fn| 在局部被重新绑定的话，那么~\verb|mac| 的返回值将和平时不一样。
+
+对于这种情况，该如何应对呢？当有捕捉风险的符号与内置函数或宏重名时，那么听之任之应该是上策。
+\note{131}\textsc{cltl}2 (260 页) 说，如果任何内置的名字被用作局部函数或宏绑定，``后果
+是未定义的。''\index{Common Lisp!differences between versions!redefining built-in operators} 所以你的宏无论做了什么都没关系\pozhehao{}任何人，如果重新绑定内置函数，那么他将来碰到的问题会比
+你的这个宏更多\index{functions 函数!redefining built-in}。
+
+另一方面，保护变量名的方法同样可以用来帮助函数名\index{capture 捕捉!of function names}免于宏参数捕捉：通过使用~gensym 作为
+宏框架局部定义的任何函数的名字。但是，如果要避免像上面这种情况中的自由符号捕捉，就会稍微麻烦一点。要让变量免受
+自由符号捕捉，采用的保护方法是使用一目了然的全局名称：例如把~\verb|w| 换成~\verb|*warnings*|
+。然而，这个解决方案对函数有些不切实际，因为没有把全局函数的名字区分出来的习惯\pozhehao{}大多数函数都是全局
+的。如果你担心发生这种情况，一个宏使用了另一个函数，而调用这个宏的环境可能会重定义这个函数，那么最佳的解决方案或许就是
+把你的代码放在一个单独的包里。\index{packages!avoiding capture with}\index{packages!using distinct}
+
+代码块名字~(block-name)\index{block-names 代码块名字} 同样可以被捕捉\index{capture 捕捉!of block names}，比如说那些被~\texttt{go} 和~\texttt{throw}
+使用的标签~(tag)\index{capture 捕捉!of tags}。当你的宏需要这些符号时，你应该像
+~\pageref{fig:implementing_do} 页上~\texttt{our-do} 的定义那样，使用~gensym。
+
+还需要注意的是像~\texttt{do} 这样的操作符隐式封装在一个名为~\texttt{nil}\index{nil@\texttt{nil}!default block name} 的块\index{do@\texttt{do}!implicit block@\texttt{block} in}里。这样在
+~\texttt{do} 里面的一个~\texttt{return}\index{return@\texttt{return}} 或~\texttt{return-from nil}\index{return-from@\texttt{return-from}} 将从
+~\texttt{do} 本身而非包含这个~\texttt{do} 的表达式里返回：\label{block_and_capture}
+\begin{lstlisting}
+> (block nil
+    (list 'a
+          (do ((x 1 (1+ x)))
+              (nil)
+            (if (> x 5)
+                (return-from nil x)
+                (princ x)))))
+12345
+(A 6)
+\end{lstlisting}
+如果~\texttt{do} 没有创建一个名为~\texttt{nil} 的块，这个例子将只返回~\texttt{6}，而
+不是~\texttt{(A 6)}。
+
+\texttt{do} 里面的隐式块\index{block@\texttt{block}!implicit 隐式}不是问题，因为~\texttt{do} 的这种工作方式广为人知。尽管如此，如果
+你写一个展开到~\texttt{do} 的宏，它将捕捉~\texttt{nil} 这个块名称。在一个类似
+~\texttt{for} 的宏里，\texttt{return} 或~\texttt{return-from nil} 将从
+~\texttt{for} 表达式而非封装这个~\texttt{for} 表达式的块中返回。
+
+\section{为何要庸人自扰?}
+\label{sec:why_bother}
+
+前面举的例子中有些非常牵强做作。看着它们，有人可能会说，“变量捕捉既然这么少见\pozhehao{}
+为什么还要操心它呢？”回答这个问题有两个方法。一个是用另一个问题反诘道：要是你写得出没有
+~bug 的程序，为什么还要写有小~bug 的程序呢？
+
+更长的答案是指出在现实应用程序中，对你代码的使用方式做任何假设都是危险的。任何~Lisp 程序都具备现在被称之为“开放式架构”的特征。如果你正在写的代码以后会为他人所用，很可能他们调用你代码的方式是出乎你预料的。而且你要担心的不光是人。程序也能编写程序。可能没人会写这样的代码
+\begin{lstlisting}
+(before (progn (setq seq '(b a)) 'a)
+        'b
+        '(a b))
+\end{lstlisting}
+但是程序生成的代码看起来经常就像这样。即使单个的宏生成的是简单合理的展开式，
+一旦你开始把宏嵌套着调用，展开式就可能变成巨大的，而且看上去没人能写得出来的程序。在这个前提下，就有必要去预防那些可能使你的宏不正确地展开的情况，就算这种情况像是有意设计出来的。
+
+最后，避免变量捕捉不管怎么说，并非难于上青天。它很快会成为你的第二直觉。Common Lisp 
+中经典的~\verb|defmacro| 好比厨子手中的菜刀：美妙的想法看上去会有些危险，
+但是这件利器一到了专家那里，就如入庖丁之手，游刃有余。
+
+%%% Local Variables:
+%%% coding: utf-8
+%%% mode: latex
+%%% TeX-master: "onlisp-cn"
+%%% End:

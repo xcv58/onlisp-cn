@@ -1,0 +1,970 @@
+%!TEX encoding = UTF-8 Unicode
+% $Id: 11-classic_macros.tex 17 2014-03-09 13:05:41Z binghe $
+
+\chapter{经典宏}
+\label{chap:classic_macros}
+
+本章介绍如何定义几种最常用的宏。它们可以大致归为三类\pozhehao{}带有一定重叠。第一组宏
+创建上下文~(context)\index{macros 宏!context-creating}。任何令其参数在一个新的上下文环境里求值的操作符都必须被定义成宏。
+本章的前两节描述两种基本类型的上下文，并且展示如何定义它们。
+
+接下来的三个小节将描述带有条件和重复求值的宏。一个操作符，如果其参数求值的次数少于一次或者多于一次，那么
+也同样必须被定义成宏。在做条件求值和重复求值的操作符之间没有明显区别：在本章中，有些例子兼具这两项功能~(绑定操作也是如此)。最后一节解释了条件求值和重复求值之间的另一种相似性：在某些
+场合，它们都可以用函数来完成。
+%% xxx, as well as binding
+\section{创建上下文}
+\label{sec:creating_context}
+
+这里的上下文有两层意思。一类上下文指的是词法环境。special form~\texttt{let} 创建一个新的词法环境；
+\texttt{let} 主体中的表达式将在一个可能包含新变量的环境中被求值。如果在
+~toplevel 下，把~\texttt{x} 设置成~\texttt{a}，那么
+\begin{lstlisting}
+(let ((x 'b)) (list x))
+\end{lstlisting}
+将必定返回~\verb|(b)|，因为对~\verb|list| 的调用被放在一个新环境里，它包含一个新
+的~\verb|x|，其值为~\verb|b|。
+
+通常会把带有表达式体的操作符定义成宏。除了类似~\verb|prog1| 和
+~\verb|progn| 的情况外，这类操作符的目地通常都是让它的主体在某个新的上下文环境中
+被求值。如果要用创建上下文的代码把主体包裹起来，就需要用到宏，即使这个上下文环境里不包含新的词法
+变量。
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro our-let (binds &body body)
+  `((lambda ,(mapcar #'(lambda (x)
+                         (if (consp x) (car x) x))
+                     binds)
+      ,@body)
+    ,@(mapcar #'(lambda (x)
+                  (if (consp x) (cadr x) nil))
+              binds)))
+\end{lstlisting}
+  \caption{\texttt{let} 的宏实现}
+  \label{fig:macro_implementation_of_let}
+\end{figure}
+
+图~\ref{fig:macro_implementation_of_let} 显示了如何通过~\texttt{lambda} 将
+~\texttt{let}\index{let@\texttt{let}} 定义为一个宏。一个~\texttt{our-let} 展开到一个函数应用\pozhehao{}
+\begin{lstlisting}
+(our-let ((x 1) (y 2))
+  (+ x y))
+\end{lstlisting}
+展开成
+\begin{lstlisting}
+((lambda (x y) (+ x y)) 1 2)
+\end{lstlisting}
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro when-bind ((var expr) &body body)
+  `(let ((,var ,expr))
+     (when ,var
+       ,@body)))
+
+(defmacro when-bind* (binds &body body)
+  (if (null binds)
+      `(progn ,@body)
+      `(let (,(car binds))
+         (if ,(caar binds)
+             (when-bind* ,(cdr binds) ,@body)))))
+
+(defmacro with-gensyms (syms &body body)
+  `(let ,(mapcar #'(lambda (s)
+                     `(,s (gensym)))
+                   syms)
+     ,@body))
+\end{lstlisting}
+\index{when-bind@\texttt{when-bind}}
+\index{when-bind*@\texttt{when-bind*}}
+\index{with-gensyms@\texttt{with-gensyms}}
+  \caption{绑定变量的宏}
+  \label{fig:macros_which_bind_variables}
+\end{figure}
+
+图~\ref{fig:macros_which_bind_variables} 包含三个新的创建词法环境的宏。第
+~\ref{sec:destructuring_in_parameter_lists} 节使用了~\texttt{when-bind} 作为参数
+列表解构的示例，所以这个宏已经在第~\pageref{mac:when_bind} 页介绍过了。更一般的
+~\texttt{when-bind*} 接受一个由成对的~\texttt{(\emph{symbol}
+\emph{expression})} form 所组成的列表\pozhehao{}就和~\texttt{let} 的第一个参数的形式相同。如果任何
+~\texttt{\emph{expression}}
+返回~\texttt{nil}，那么整个~\texttt{when-bind*} 表达式就返回~\texttt{nil}。同样，
+它的主体在每个\emph{符号}像在~\texttt{let*} 里那样被绑定的情况下求值：
+\begin{lstlisting}
+> (when-bind* ((x (find-if #'consp '(a (1 2) b)))
+               (y (find-if #'oddp x)))
+    (+ y 10))
+11
+\end{lstlisting}
+
+最后，宏~\texttt{with-gensyms} 本身就是用来编写宏的。许多宏在定义的开头就会用~gensym 生成一些符号，有时需要生成符号的数量还比较多。宏~\texttt{with-redraw} (第~\pageref{mac:with-redraw} 页) 就必须生成五个：
+\begin{lstlisting}
+(defmacro with-redraw ((var objs) &body body)
+  (let ((gob (gensym))
+        (x0 (gensym)) (y0 (gensym))
+        (x1 (gensym)) (y1 (gensym)))
+    ...))
+\end{lstlisting}
+这样的定义可以通过使用~\texttt{with-gensyms} 得以简化，后者将整个变量列表绑定到~gensym 上。借助这个新的宏，我们只需写成：
+\begin{lstlisting}
+(defmacro with-redraw ((var objs) &body body)
+  (with-gensyms (gob x0 y0 x1 y1)
+    ...))
+\end{lstlisting}
+这个新的宏将被广泛用于后续的章节中。
+
+如果我们需要绑定某些变量，然后依据某些条件，来求值一组表达式中的一个，我们只需在
+~\texttt{let} 里使用一个条件判断：
+\begin{lstlisting}
+(let ((sun-place 'park) (rain-place 'library))
+  (if (sunny)
+      (visit sun-place)
+      (visit rain-place)))
+\end{lstlisting}
+不幸的是，对于相反的情形没有简便的写法，就是说我们总是想要求值相同的代码，但在
+\emph{绑定}的那里必须随某些条件而变。
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro condlet (clauses &body body)
+  (let ((bodfn (gensym))
+        (vars (mapcar #'(lambda (v) (cons v (gensym)))
+                      (remove-duplicates
+                        (mapcar #'car
+                                (mappend #'cdr clauses))))))
+    `(labels ((,bodfn ,(mapcar #'car vars)
+                 ,@body))
+       (cond ,@(mapcar #'(lambda (cl)
+                           (condlet-clause vars cl bodfn))
+                       clauses)))))
+
+(defun condlet-clause (vars cl bodfn)
+  `(,(car cl) (let ,(mapcar #'cdr vars)
+                (let ,(condlet-binds vars cl)
+                  (,bodfn ,@(mapcar #'cdr vars))))))
+
+(defun condlet-binds (vars cl)
+  (mapcar #'(lambda (bindform)
+              (if (consp bindform)
+                  (cons (cdr (assoc (car bindform) vars))
+                        (cdr bindform))))
+          (cdr cl)))
+\end{lstlisting}
+  \caption{\texttt{cond} 与~\texttt{let} 的组合}
+  \label{fig:combination_of_cond_and_let}
+\end{figure}
+
+图~\ref{fig:combination_of_cond_and_let} 包含一个处理类似情况的宏。从它
+的名字就能看出，\texttt{condlet} 行为就好像它
+是~\texttt{cond} 和~\texttt{let} 的后代一样。它接受一个绑定语句的列表，接
+着是一个代码主体。每个绑定语句是否生效都要视其对应的测试表达式而定；第
+一个测试表达式为真的绑定语句所构造的绑定环境将会胜出，代码主体将在这个
+绑定环境中被求值。有的变量只出现在某些语句中，却在其它语句里没有出
+现，如果最后被选中的语句里没有为它们指定绑定的话，它们将会被绑定
+到~\texttt{nil} 上：
+\begin{lstlisting}
+> (condlet (((= 1 2) (x (princ 'a)) (y (princ 'b)))
+            ((= 1 1) (y (princ 'c)) (x (princ 'd)))
+            (t       (x (princ 'e)) (z (princ 'f))))
+    (list x y z))
+CD
+(D C NIL)
+\end{lstlisting}
+
+可以把~\texttt{condlet} 的定义理解成为~\texttt{our-let} 定义的一般化。后者将其主体
+做成一个函数，然后被应用到初值~(initial value) 形式的求值结果上。\texttt{condlet}
+展开后的代码用~\texttt{labels} 定义了一个本地函数，然后一个~\texttt{cond} 语句来决定
+哪一组初值将被求值并传给该函数。
+
+注意到展开器使用~\texttt{mappend} 代替~\texttt{mapcan} 来从绑定语句中解出变量名。
+这是因为~\texttt{mapcan} 是破坏性的，根据第~\ref{sec:non-functional_expanders}
+节里的警告，它比较危险，会修改参数列表结构。
+
+\section{\texttt{with-} 宏}
+\label{sec:the_with_macro}
+
+除了词法环境以外还有另一种上下文。广义上来讲，上下文是世界的状态，包括特殊变量的值，数据结构
+的内容，以及~Lisp 之外事物的状态。构造这种类型上下文的操作符也必须被定义成宏，除非它们的
+代码主体要被打包进闭包里。
+
+构造上下文的宏的名字经常以~\texttt{with-} 开始。这类宏中，用得最多恐怕要算
+~\texttt{with-open-file}\index{with-open-file@\texttt{with-open-file}} 了。
+它的主体和一个新打开的文件一起求值，其时，该文件已经绑定到了用户给定的变量：
+\begin{lstlisting}
+(with-open-file (s "dump" :direction :output)
+  (princ 99 s))
+\end{lstlisting}
+该表达式求值完毕以后，文件~\texttt{"dump"} 将自动关闭，它的内容将是两个字符
+~\texttt{"99"}。
+
+很明显，这个操作符应该定义成宏，因为它绑定了~\texttt{s}。其实，只要一个操作符需要让~form 在新的上下文中进行求值，
+那就应当把它定义为宏。在~\textsc{cltl}2 中新加入的~\texttt{ignore-errors}\index{ignore-errors@\texttt{ignore-errors}}\index{Common Lisp!differences between versions!ignore-errors@\texttt{ignore-errors}} 宏，
+使它的参数就像在一个~\texttt{progn} 里求值一样。不管什么地方出了错，
+整个~\texttt{ignore-errors} form 会直接返回~\texttt{nil}。(在读取用户的输入时，可能就有这种需要。所以这还是有点用的。) 
+尽管~\texttt{ignore-errors} 没有创建任何变量，但它还是必须定义成宏，因为它的参数是在一个新的上下文里求值的。
+
+一般而言，创建上下文的宏将被展开成一个代码块；附加的表达式可能被放在主体之前、之后，或者前后
+都有。如果是出现在主体之后，其目的可能是为了在结束时，让系统的状态保持一致\pozhehao{}去做某些清理工作。
+例如，\texttt{with-open-file} 必须关闭它打开的文件。在这种情况下，典型的方法是将上下文
+创建的宏展开进一个~\texttt{unwind-protect}\index{unwind-protect@\texttt{unwind-protect}} 里。
+
+\texttt{unwind-protect} 的目的是确保特定表达式被求值，甚至当执行被中断时。它接受一个或
+更多参数，这些参数按顺序执行。如果一切正常的话它将返回第一个参数的值，就像
+~\texttt{prog1}。区别在于，即使当出现错误，或者抛出的异常中断了第一个参数的求值，其余的参数
+也一样会被求值。
+\begin{lstlisting}
+> (setq x 'a)
+A
+> (unwind-protect
+    (progn (princ "What error?")
+           (error "This error."))
+    (setq x 'b))
+What error?
+>>Error: This error.
+\end{lstlisting}
+\index{error@\texttt{error}}
+
+作为整体，\texttt{unwind-protect} form 产生了一个错误。但是在返回到~toplevel 之后
+，我们注意到它的第二个参数仍然被求值了：
+\begin{lstlisting}
+> x
+B
+\end{lstlisting}
+因为~\texttt{with-open-file} 展开成了一个~\texttt{unwind-protect}，所以即使
+对~\texttt{with-open-file} 的~body 求值时发生了错误，它打开的文件还是会一如既往
+地被关闭，
+
+上下文创建宏多数是为特定应用而写的。举个例子，假设我们在写一个程序，它会和多个远程数据库打交道。
+程序在同一时刻只和一个数据库通信，这个数据库由全局变量~\verb|*db*| 指定。在使用数据库之前，我们
+必须对它加锁\index{databases 数据库!locks on 加锁}，以确保没有其他程序能同时使用它。完成操作后需要对其解锁。如果想
+对数据库~\texttt{db} 查询~\texttt{q} 的值，或许会这样说：
+\begin{lstlisting}
+(let ((temp *db*))
+  (setq *db* db)
+  (lock *db*)
+  (prog1 (eval-query q)
+         (release *db*)
+         (setq *db* temp)))
+\end{lstlisting}
+
+\begin{figure}
+完全使用宏：
+\begin{lstlisting}
+(defmacro with-db (db &body body)
+  (let ((temp (gensym)))
+    `(let ((,temp *db*))
+       (unwind-protect
+         (progn
+           (setq *db* ,db)
+           (lock *db*)
+           ,@body)
+         (progn
+           (release *db*)
+           (setq *db* ,temp))))))
+\end{lstlisting}
+宏和函数结合使用\index{macros 宏!combined with functions}\index{functions 函数!combined with macros}：
+\begin{lstlisting}
+(defmacro with-db (db &body body)
+  (let ((gbod (gensym)))
+    `(let ((,gbod #'(lambda () ,@body)))
+       (declare (dynamic-extent ,gbod))
+       (with-db-fn *db* ,db ,gbod))))
+
+(defun with-db-fn (old-db new-db body)
+  (unwind-protect
+    (progn
+      (setq *db* new-db)
+      (lock *db*)
+      (funcall body))
+    (progn
+      (release *db*)
+      (setq *db* old-db))))
+\end{lstlisting}
+  \caption{一个典型的~\texttt{with-} 宏}
+  \label{fig:a_typical_with_macro}
+\end{figure}
+我们可以通过宏把所有这些维护操作都藏起来。图~\ref{fig:a_typical_with_macro} 定义了一个
+宏，它让我们在更高的抽象层面上管理数据库。使用~\texttt{with-db}，我们只需说：
+\begin{lstlisting}
+(with-db db
+  (eval-query q))
+\end{lstlisting}
+而且调用~\texttt{with-db} 也更安全，因为它会展开成~\texttt{unwind-protect} 而不是
+简单的~\texttt{prog1}。
+
+图~\ref{fig:a_typical_with_macro} 中的两个定义阐述了编写此类宏的两种可能方式。第一种
+是完全用宏，第二种把函数和宏结合起来。当~\texttt{with-} 宏变得愈发复杂时，第二种方法更有
+实践意义。
+
+%% xxx
+在~\textsc{cltl}2 Common Lisp 中，\texttt{dynamic-extent}\index{dynamic
+  extent 动态作用域}\index{extent, dynamic}\index{Common Lisp!differences between versions!dynamic-extent@\texttt{dynamic-extent}} 声明使得在为含主体的闭包分配空间时，可以更高效
+一些~(\textsc{cltl}1 实现会忽略该声明)。我们只有在~\texttt{with-db-fn}
+调用期间才需要这个闭包，该声明也正合乎这个要求，它允许编译器从栈上为其分配
+空间\index{functions 函数!closures of!stack allocation of}\index{stacks 栈!allocation on 从中分配}。这些空间将
+在~\texttt{let} 表达式退出时自动回收，而不是之后由垃圾收集器回收。
+
+\section{条件求值}
+\label{sec:conditional_evaluation}
+
+有时我们需要让宏调用中的某个参数仅在特定条件下才被求值。这超出了函数的能力，因为函数总是
+会对它所有的参数进行求值。不过诸如~\texttt{if}、\texttt{and} 和~\texttt{cond} 这样内置的操作符
+能够使某些参数免于求值，除非其它参数返回某些特定的值。例如在下式中
+\begin{lstlisting}
+(if t
+    'phew
+    (/ x 0))
+\end{lstlisting}
+第三个参数如果被求值的话将导致一个除零错误。但由于只有前两个参数将被求值，\texttt{if} 从
+整体上将总是安全地返回~\texttt{phew}。
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro if3 (test t-case nil-case ?-case)
+  `(case ,test
+     ((nil) ,nil-case)
+     (?     ,?-case)
+     (t     ,t-case)))
+
+(defmacro nif (expr pos zero neg)
+  (let ((g (gensym)))
+    `(let ((,g ,expr))
+       (cond ((plusp ,g) ,pos)
+             ((zerop ,g) ,zero)
+             (t ,neg)))))
+\end{lstlisting}
+\index{if3@\texttt{if3}}
+\index{nif@\texttt{nif}}
+  \caption{做条件求值的宏}
+  \label{fig:macros_for_conditional_evaluation}
+\end{figure}
+
+我们可以通过编写宏，将调用展开到已有的操作符上来创造这类新操作符。图
+~\ref{fig:macros_for_conditional_evaluation} 中的两个宏是许多可能的~\texttt{if}
+变形中的两个。\texttt{if3} 的定义显示了应如何定义一个三值逻辑\index{three-valued logic 三值逻辑}的条件选择。这个宏不再
+将~\texttt{nil} 当成假，把除此之外的都作为真，而是考虑了三种真值类型：真，假，
+以及\emph{不确定}，表示为~\verb|?|。它可能用于下面关于五岁小孩的描述：
+\begin{lstlisting}
+(while (not sick)
+  (if3 (cake-permitted)
+       (eat-cake)
+       (throw 'tantrum nil)
+       (plead-insistently)))
+\end{lstlisting}
+
+这个新的条件选择展开成一个~\texttt{case}。(那个~\texttt{nil} 键必须封装在列表里，
+原因是单独的~\texttt{nil} 键会有歧义。) 最后三个参数中只有一个会被求值，至于是哪一个，
+这取决于第一个参数的值。
+
+\texttt{nif} 的意思是~``numeric if''。该宏的另一种实现出现在~\pageref{mac:nif} 页
+上。它接受数值表达式作为第一个参数，并根据这个表达式的符号来求值接下来三个参数中的一个。
+\begin{lstlisting}
+> (mapcar #'(lambda (x)
+              (nif x 'p 'z 'n))
+          '(0 1 -1))
+(Z P N)
+\end{lstlisting}
+\begin{figure}
+\begin{lstlisting}
+(defmacro in (obj &rest choices)
+  (let ((insym (gensym)))
+    `(let ((,insym ,obj))
+       (or ,@(mapcar #'(lambda (c) `(eql ,insym ,c))
+                     choices)))))
+
+(defmacro inq (obj &rest args)
+  `(in ,obj ,@(mapcar #'(lambda (a)
+                          `',a)
+                      args)))
+
+(defmacro in-if (fn &rest choices)
+  (let ((fnsym (gensym)))
+    `(let ((,fnsym ,fn))
+       (or ,@(mapcar #'(lambda (c)
+                         `(funcall ,fnsym ,c))
+                     choices)))))
+
+(defmacro >case (expr &rest clauses)
+  (let ((g (gensym)))
+    `(let ((,g ,expr))
+       (cond ,@(mapcar #'(lambda (cl) (>casex g cl))
+                       clauses)))))
+
+(defmacro >casex (g cl)
+  (let ((key (car cl)) (rest (cdr cl)))
+    (cond ((consp key) `((in ,g ,@key) ,@rest))
+          ((inq key t otherwise) `(t ,@rest))
+          (t (error "bad >case clause")))))
+\end{lstlisting}
+\index{in@\texttt{in}}
+\index{inq@\texttt{inq}}
+\index{in-if@\texttt{in-if}}
+\index{case@\texttt{>case}}
+  \caption{使用条件求值的宏}
+  \label{fig:macros_for_conditional_evaluation_2}
+\end{figure}
+
+图~\ref{fig:macros_for_conditional_evaluation_2} 包含了另外几个使用条件求值的
+宏。宏~\texttt{in} 用来高效地测试集合的成员关系。要是你想要测试一个对象是否属于某备选对象
+的集合，可以把这个查询表达式表示成逻辑或：
+\begin{lstlisting}
+(let ((x (foo)))
+  (or (eql x (bar)) (eql x (baz))))
+\end{lstlisting}
+或者你也可以用集合的成员关系来表达：
+\begin{lstlisting}
+(member (foo) (list (bar) (baz)))
+\end{lstlisting}
+后者更抽象，但效率要差些。该~\texttt{member} 表达式在两个地方导致了毫无必要的开销
+\index{member@\texttt{member}!misuse of 滥用}。它需要
+构造点对，因为它必须将所有备选对象连结成一个列表以便~\texttt{member} 进行查找。并且为了
+把备选项做成列表形式它们全都要被求值，尽管某些值可能根本不需要。如果~\verb|(foo)| 和
+~\verb|(bar)| 的值相等，那么就不需要求值~\texttt{(baz)} 了。\index{evaluation 求值!avoiding 避免}
+不管它在建模上多么抽象，使用~\texttt{member} 都不是好方法。我们可以通过宏来得到更有效率的抽象：\texttt{in} 把
+~\texttt{member} 的抽象与~\texttt{or} 的效率结合在了一起。等价的~\texttt{in} 表达式
+\begin{lstlisting}
+(in (foo) (bar) (baz))
+\end{lstlisting}
+跟~\texttt{member} 表达式的形态相同，但却可以展开成
+\begin{lstlisting}
+(let ((#:g25 (foo)))
+  (or (eql #:g25 (bar))
+      (eql #:g25 (baz))))
+\end{lstlisting}
+情况经常是这样，当需要在简洁和高效两种习惯用法之间择一而从时，我们取中庸之道，方法是编写宏将
+前者变换成为后者。
+
+发音为``in queue''的~\texttt{inq} 是~\texttt{in} 的引用变形，类似~\texttt{setq}
+之于~\texttt{set}。表达式
+\begin{lstlisting}
+(inq operator + - *)
+\end{lstlisting}
+展开成
+\begin{lstlisting}
+(in operator '+ '- '*)
+\end{lstlisting}
+
+和~\texttt{member} 的缺省行为一样，\texttt{in} 和~\texttt{inq} 用~\texttt{eql}
+来测试等价性。如果你想要使用其他的测试条件，或者某个一元函数来进行测试，那么可以
+改用更一般的~\texttt{in-if}。\texttt{in-if} 之于~\texttt{same} 好比是~\texttt{in}
+对~\texttt{member} 的关系。表达式
+\begin{lstlisting}
+(member x (list a b) :test #'equal)
+\end{lstlisting}
+也可以写作
+\begin{lstlisting}
+(in-if #'(lambda (y) (equal x y)) a b)
+\end{lstlisting}
+而
+\begin{lstlisting}
+(some #'oddp (list a b))
+\end{lstlisting}
+就变成
+\begin{lstlisting}
+(in-if #'oddp a b)
+\end{lstlisting}
+
+把~\verb|cond| 和~\verb|in| 一起用的话，我们还能定义出一个有用的~\verb|case| 
+变形。Common Lisp 的~\verb|case| 宏假定它的键值都是常量。但有时可能需要
+~\texttt{case} 的行为，同时又希望求值其中的键。针对这类情况我们定义了~\texttt{>case}，
+除了它会在比较之前先对每个子句里的键进行求值以外，其行为和~\texttt{case} 相同。(名字中的
+~\texttt{>} 意指通常用来表示求值过程的那个箭头符号。) 因为~\texttt{>case} 使用了
+~\texttt{in}，只有它需要的那个键才会被求值。
+
+由于键可以是~Lisp 表达式，无法判断~\verb|(x y)| 到底是个函数调用还是由两个键组成的
+列表。为了避免这种二义性，键~(除了~\texttt{t} 和~\texttt{otherwise}) 必须总是放在列表
+里给出，哪怕是只有一个。在~\texttt{case} 表达式里，由于会产生歧义，\texttt{nil} 不能作为
+子句的~car 出现\index{nil@\texttt{nil}!forbidden in \texttt{case} clauses}。在~\texttt{>case} 表达式里，\texttt{nil} 作为子句的~car 就不再有
+歧义了，但它的含义是该子句的其余部分将不会被求值。
+
+为清晰起见，生成每一个~\texttt{>case} 子句展开式的代码被定义在一个单独的函数
+~\texttt{>casex} 里。注意到~\texttt{>casex} 本身还用到了~\texttt{inq}。
+
+\section{迭代}
+\label{sec:iteration}
+
+有时，函数的麻烦之处并非在于它们的参数总是被求值，而是它们只能求值一次。因为函数的每个
+参数都将被求值刚好一次，如果我们想要定义一个操作符，它接受一些表达式体，并且在这些表达式上进行迭代操作，
+那唯一的办法就是把它定义成宏\index{iteration!macros for}。
+
+最简单的例子就是一个能够按顺序永无休止地求值其参数的宏：
+\begin{lstlisting}
+(defmacro forever (&body body)
+  `(do ()
+       (nil)
+     ,@body))
+\end{lstlisting}
+这不过是当你不给它任何循环关键字时，\texttt{loop}\index{loop@\texttt{loop}} 宏的本分。
+你可能认为无限循环毫无用处~(或者说用处不大)。但当它和~\texttt{block}\index{block@\texttt{block}} 和~\texttt{return-from}\index{return-from@\texttt{return-from}}
+组合起来使用时, 这类宏就变成了表达某种循环最自然的方式。这种循环只会在一些突发情况下才停下来\index{loops!interrupting 终止}。
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro while (test &body body)
+  `(do ()
+       ((not ,test))
+     ,@body))
+
+(defmacro till (test &body body)
+  `(do ()
+       (,test)
+     ,@body))
+
+(defmacro for ((var start stop) &body body)
+  (let ((gstop (gensym)))
+    `(do ((,var ,start (1+ ,var))
+          (,gstop ,stop))
+         ((> ,var ,gstop))
+       ,@body)))
+\end{lstlisting}
+\index{while@\texttt{while}}
+\index{till@\texttt{till}}
+\index{for@\texttt{for}}
+  \caption{简单的迭代宏}
+  \label{fig:simple_iteration_macros} 
+\end{figure}
+
+图~\ref{fig:simple_iteration_macros} 中给出了一些最简单的迭代宏。其中，\texttt{while} 我们之前已经见过了
+~(\pageref{macro:while} 页)，其主体将在测试表达式返回真时求值。
+与之对应的是~\texttt{till}，它是在测试表达式返回假时求值。最后是~\texttt{for}，
+同样，在前面也有过一面之缘~(\pageref{macro:for} 页)，它在给定的数字区间上做迭代操作。
+
+我们定义这些宏，让它们展开成~\texttt{do}，用这个办法，使得在宏的主体里能使用~\texttt{go}\index{go@\texttt{go}} 和
+~\texttt{return}\index{return@\texttt{return}}。正如~\texttt{do} 从~\texttt{block} 和~\texttt{tagbody}\index{tagbody@\texttt{tagbody}} 那里继承
+了这些权力，\verb|do| 也把这种权利传给了~\verb|while|、\verb|till| 和~\verb|for|。
+正如~\pageref{block_and_capture} 页上解释的，\texttt{do} 内部隐含
+~\texttt{block}\index{block@\texttt{block}!implicit 隐式} 里的~\texttt{nil} 标签将被图~\ref{fig:simple_iteration_macros}
+中的宏所捕捉。虽然与其说这是个~bug，不如说它是个特性，但至少应该明确提出来。
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro do-tuples/o (parms source &body body)
+  (if parms
+      (let ((src (gensym)))
+        `(prog ((,src ,source))
+           (mapc #'(lambda ,parms ,@body)
+                 ,@(map0-n #'(lambda (n)
+                               `(nthcdr ,n ,src))
+                           (- (length source)
+                              (length parms))))))))
+
+(defmacro do-tuples/c (parms source &body body)
+  (if parms
+      (with-gensyms (src rest bodfn)
+        (let ((len (length parms)))
+          `(let ((,src ,source))
+             (when (nthcdr ,(1- len) ,src)
+               (labels ((,bodfn ,parms ,@body))
+                 (do ((,rest ,src (cdr ,rest)))
+                     ((not (nthcdr ,(1- len) ,rest))
+                      ,@(mapcar #'(lambda (args)
+                                    `(,bodfn ,@args))
+                                (dt-args len rest src))
+                     nil)
+                   (,bodfn ,@(map1-n #'(lambda (n)
+                                         `(nth ,(1- n)
+                                               ,rest))
+                                     len))))))))))
+
+(defun dt-args (len rest src)
+  (map0-n #'(lambda (m)
+              (map1-n #'(lambda (n)
+                          (let ((x (+ m n)))
+                            (if (>= x len)
+                                `(nth ,(- x len) ,src)
+                                `(nth ,(1- x) ,rest))))
+                      len))
+          (- len 2)))
+\end{lstlisting}
+  \caption{迭代子序列的宏}
+  \label{fig:macros_for_interation_by_subsequences}
+  \index{do-tuples/o@\texttt{do-tuples/o}}
+  \index{do-tuples/c@\texttt{do-tuples/c}}
+\end{figure}
+
+当你需要定义更强大的迭代结构时，宏是必不可少的。
+图~\ref{fig:macros_for_interation_by_subsequences} 里包括了两个~\texttt{dolist}
+的一般化；两者都在求值主体时绑定一组变量到一个列表中相继的子序列上。例如，给定两个参数，
+\texttt{do-tuples/o} 将成对迭代：
+\begin{lstlisting}
+> (do-tuples/o (x y) '(a b c d)
+    (princ (list x y)))
+(A B)(B C)(C D)
+NIL
+\end{lstlisting}
+给定相同的参数，\verb|do-tuples/c| 将会做同样的事，然后折回到列表的开头：
+\begin{lstlisting}
+> (do-tuples/c (x y) '(a b c d)
+    (princ (list x y)))
+(A B)(B C)(C D)(D A)
+NIL
+\end{lstlisting}
+两个宏都返回~\texttt{nil}，除非在主体中有显式的~\texttt{return}。
+
+在需要处理某种路径表示的程序里，会经常用到这类迭代结构。后缀~\texttt{/o} 和~\texttt{/c} 被用来
+表明这两个版本的迭代控制结构是分别用于遍历开放和封闭的路径的\index{paths, traversing}。举个例子，如果~\texttt{points} 是一个点的
+列表而~\texttt{(drawline $x$ $y$)} 在~$x$ 和~$y$ 之间画线，那么画一条从起点到终点的
+路径我们写成
+\begin{lstlisting}
+(do-tuples/o (x y) points (drawline x y))
+\end{lstlisting}
+假如~\texttt{points} 是一个多边形的节点列表，为了画出它的轮廓，我们这样写
+\begin{lstlisting}
+(do-tuples/c (x y) points (drawline x y))
+\end{lstlisting}
+
+作为第一个实参给出的形参列表的长度是任意的，相应的迭代就会按照那个长度的组合进行。如果只给
+一个参数，两者都会退化成~\texttt{dolist}：
+\begin{lstlisting}
+> (do-tuples/o (x) '(a b c) (princ x))
+ABC
+NIL
+> (do-tuples/c (x) '(a b c) (princ x))
+ABC
+NIL
+\end{lstlisting}
+
+\verb|do-tuples/c| 的定义比~\texttt{do-tuples/o} 更复杂一些，因为它要在搜索到列表
+结尾时折返回来。如果有~$n$ 个参数，\texttt{do-tuples/c} 必须在返回之前多做~$n-1$ 次
+迭代：
+\begin{lstlisting}
+> (do-tuples/c (x y z) '(a b c d)
+    (princ (list x y z)))
+(A B C)(B C D)(C D A)(D A B)
+NIL
+> (do-tuples/c (w x y z) '(a b c d)
+    (princ (list w x y z)))
+(A B C D)(B C D A)(C D A B)(D A B C)
+NIL
+\end{lstlisting}
+前一个对~\texttt{do-tuples/c} 调用的展开式显示在图
+~\ref{fig:expansion_of_a_call_to_do-tuples_c} 中。生成过程的困难之处是
+那些展示折返到列表开头的调用序列。这些调用~(在本例中有两个) 由~\texttt{dt-args} 生成。
+
+\begin{figure}
+\begin{lstlisting}
+(do-tuples/c (x y z) '(a b c d)
+  (princ (list x y z)))
+\end{lstlisting}
+展开成：
+\begin{lstlisting}
+(let ((#:g2 '(a b c d)))
+  (when (nthcdr 2 #:g2)
+    (labels ((#:g4 (x y z)
+               (princ (list x y z))))
+      (do ((#:g3 #:g2 (cdr #:g3)))
+          ((not (nthcdr 2 #:g3))
+           (#:g4 (nth 0 #:g3)
+                 (nth 1 #:g3)
+                 (nth 0 #:g2))
+           (#:g4 (nth 1 #:g3)
+                 (nth 0 #:g2)
+                 (nth 1 #:g2))
+           nil)
+        (#:g4 (nth 0 #:g3)
+              (nth 1 #:g3)
+              (nth 2 #:g3))))))
+\end{lstlisting}
+  \caption{一个~\texttt{do-tuples/c} 调用的展开}
+  \label{fig:expansion_of_a_call_to_do-tuples_c}
+\end{figure}
+
+\section{多值迭代}
+\label{sec:iteration_with_multiple_values}
+\index{multiple values 多值!iteration with 迭代}
+
+内置~\verb|do| 宏早在多重返回值之前就已经有了。幸运的是，
+\texttt{do} 可以继续进化以适应新的形势，因为~Lisp 的进化\index{evolution!of Lisp}掌握在程序员的手中。图
+~\ref{fig:multiple_value_binding_version_of_dostar} 包含一个支持多值的
+~\texttt{do*} 版本。在~\texttt{mvdo*} 里，每个初值语句可绑定多个变量：
+\begin{lstlisting}
+> (mvdo* ((x 1 (1+ x))
+          ((y z) (values 0 0) (values z x)))
+         ((> x 5) (list x y z))
+    (princ (list x y z)))
+(1 0 0)(2 0 2)(3 2 3)(4 3 4)(5 4 5)
+(6 5 6)
+\end{lstlisting}
+这类迭代非常有用，例如，在交互式图形程序里经常需要处理诸如坐标和区域这样的多值数据。
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro mvdo* (parm-cl test-cl &body body)
+  (mvdo-gen parm-cl parm-cl test-cl body))
+
+(defun mvdo-gen (binds rebinds test body)
+  (if (null binds)
+      (let ((label (gensym)))
+        `(prog nil
+           ,label
+           (if ,(car test)
+               (return (progn ,@(cdr test))))
+           ,@body
+           ,@(mvdo-rebind-gen rebinds)
+           (go ,label)))
+      (let ((rec (mvdo-gen (cdr binds) rebinds test body)))
+        (let ((var/s (caar binds)) (expr (cadar binds)))
+          (if (atom var/s)
+              `(let ((,var/s ,expr)) ,rec)
+              `(multiple-value-bind ,var/s ,expr ,rec))))))
+
+(defun mvdo-rebind-gen (rebinds)
+  (cond ((null rebinds) nil)
+        ((< (length (car rebinds)) 3)
+         (mvdo-rebind-gen (cdr rebinds)))
+        (t
+         (cons (list (if (atom (caar rebinds))
+                         'setq
+                         'multiple-value-setq)
+                     (caar rebinds)
+                     (third (car rebinds)))
+               (mvdo-rebind-gen (cdr rebinds))))))
+\end{lstlisting}
+\index{mvdo*@\texttt{mvdo*}}
+  \caption{\texttt{do*} 的多值绑定版本}
+  \label{fig:multiple_value_binding_version_of_dostar}
+  \index{do*@\texttt{do*}!multiple-valued version}
+\end{figure}
+
+假设我们想要写一个简单的交互式游戏，游戏的目标是避免被两个追踪者挤成碎片。如果两个追踪者同时
+碰到你，那么你就输了；如果它们自己撞到一起，你就是赢家。图~\ref{fig:a_game_of_squash}
+显示了该游戏的主循环是如何用~\texttt{mvdo*} 写成的。
+
+\begin{figure}
+\begin{lstlisting}
+(mvdo* (((px py) (pos player)   (move player mx my))
+        ((x1 y1) (pos obj1)     (move obj1 (- px x1)
+                                           (- py y1)))
+        ((x2 y2) (pos obj2)     (move obj2 (- px x2)
+                                           (- py y2)))
+        ((mx my) (mouse-vector) (mouse-vector))
+        (win     nil            (touch obj1 obj2))
+        (lose    nil            (and (touch obj1 player)
+                                     (touch obj2 player))))
+       ((or win lose) (if win 'win 'lose))
+  (clear)
+  (draw obj1)
+  (draw obj2)
+  (draw player))
+\end{lstlisting}
+  \texttt{(pos $obj$)} 返回代表~\emph{obj} 位置的两个值~\texttt{x}，
+  \texttt{y}。开始的时候三个对象的位置是随机的。
+
+  \texttt{(move $obj$ $dx$ $dy$)} 根据类型和向量~$\langle dx,dy \rangle$
+  来移动对象~\emph{obj}。返回的两个值~\texttt{x}，\texttt{y} 代表其新位置。
+
+  \texttt{(mouse-vector)} 返回代表当前鼠标移动位置的两个值~\texttt{mx}，\texttt{my}。
+
+  \texttt{(touch $obj1$ $obj2$)} 返回真，如果~\emph{obj1} 碰上了
+  ~\emph{obj2}。
+
+  \texttt{(clear)} 清空游戏区域。
+
+  \texttt{(draw $obj$)} 在当前位置绘制~\emph{obj}。
+  \caption{一个碰撞游戏}
+  \label{fig:a_game_of_squash}
+\end{figure}
+\index{squash 碰撞游戏}
+
+也有可能写出一个~\texttt{mvdo}，并行绑定其局部变量：
+\begin{lstlisting}
+> (mvdo ((x 1 (1+ x))
+         ((y z) (values 0 0) (values z x)))
+        ((> x 5) (list x y z))
+    (princ (list x y z)))
+(1 0 0)(2 0 1)(3 1 2)(4 2 3)(5 3 4)
+(6 4 5)
+\end{lstlisting}
+
+\verb|do| 的定义中需要用到~\verb|psetq| 的原因在第~\pageref{desc:psetq} 页里曾解释过。
+为了定义~\texttt{mvdo}，需要一个多值版本的~\texttt{psetq}。\note{158}由于~Common Lisp 没有
+提供这种操作符，所以我们必须自己写一个，如图~\ref{fig:multiple_value_version_of_psetq} 所示。
+新的宏的工作方式如下：
+\begin{lstlisting}
+> (let ((w 0) (x 1) (y 2) (z 3))
+    (mvpsetq (w x) (values 'a 'b) (y z) (values w x))
+    (list w x y z))
+(A B 0 1)
+\end{lstlisting}
+\texttt{mvpsetq} 的定义依赖于三个工具函数：\texttt{mklist} (\pageref{fun:mklist}
+页)，\texttt{group} (\pageref{fun:group} 页)，以及在这里定义的~\texttt{shuffle}，
+用来交错两个列表\index{lists!interleaving}：
+\begin{lstlisting}
+> (shuffle '(a b c) '(1 2 3 4))
+(A 1 B 2 C 3 4)
+\end{lstlisting}
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro mvpsetq (&rest args)
+  (let* ((pairs (group args 2))
+         (syms  (mapcar #'(lambda (p)
+                            (mapcar #'(lambda (x) (gensym))
+                                    (mklist (car p))))
+                        pairs)))
+    (labels ((rec (ps ss)
+               (if (null ps)
+                   `(setq
+                     ,@(mapcan #'(lambda (p s)
+                                   (shuffle (mklist (car p))
+                                            s))
+                               pairs syms))
+                   (let ((body (rec (cdr ps) (cdr ss))))
+                     (let ((var/s (caar ps))
+                           (expr (cadar ps)))
+                       (if (consp var/s)
+                           `(multiple-value-bind ,(car ss)
+                                                 ,expr
+                              ,body)
+                           `(let ((,@(car ss) ,expr))
+                              ,body)))))))
+      (rec pairs syms))))
+
+(defun shuffle (x y)
+  (cond ((null x) y)
+        ((null y) x)
+        (t (list* (car x) (car y)
+                  (shuffle (cdr x) (cdr y))))))
+\end{lstlisting}
+\index{mvpsetq@\texttt{mvpsetq}}
+\index{shuffle@\texttt{shuffle}}
+  \caption{\texttt{psetq} 的多值版本}
+  \label{fig:multiple_value_version_of_psetq}
+  \index{psetq@\texttt{psetq}!multiple-valued version}
+\end{figure}
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro mvdo (binds (test &rest result) &body body)
+  (let ((label (gensym))
+        (temps (mapcar #'(lambda (b)
+                           (if (listp (car b))
+                               (mapcar #'(lambda (x)
+                                           (gensym))
+                                       (car b))
+                               (gensym)))
+                       binds)))
+    `(let ,(mappend #'mklist temps)
+       (mvpsetq ,@(mapcan #'(lambda (b var)
+                              (list var (cadr b)))
+                          binds
+                          temps))
+       (prog ,(mapcar #'(lambda (b var) (list b var))
+                      (mappend #'mklist (mapcar #'car binds))
+                      (mappend #'mklist temps))
+         ,label
+         (if ,test
+             (return (progn ,@result)))
+         ,@body
+         (mvpsetq ,@(mapcan #'(lambda (b)
+                                (if (third b)
+                                    (list (car b)
+                                          (third b))))
+                            binds))
+         (go ,label)))))
+\end{lstlisting}
+\index{mvdo@\texttt{mvdo}}
+  \caption{\texttt{do} 的多值绑定版本}
+  \label{fig:multiple_value_binding_version_of_do}
+  \index{do@\texttt{do}!multiple-valued version}
+\end{figure}
+
+借助~\verb|mvpsetq|，我们就可以定义~\verb|mvdo| 了，如图
+~\ref{fig:multiple_value_binding_version_of_do} 所示。和~\verb|condlet| 一样，
+这个宏使用了~\verb|mappend| 来代替~\verb|mapcan|\footnote{译者注：原文为
+~mapcar，按照~\texttt{condlet} 来看应该是一个错误。} 以避免修改最初的宏调用。这种
+~\verb|mappend|-\verb|mklist| 写法\index{mappend-mklist@\texttt{mappend}-\texttt{mklist} idiom}可以把一棵树压扁一层：
+\begin{lstlisting}
+> (mappend #'mklist '((a b c) d (e (f g) h) ((i)) j))
+(A B C D E (F G) H (I) J)
+\end{lstlisting}
+为了有助于理解这个相当长的宏，图~\ref{fig:expansion_of_a_call_to_mvdo} 中含有一个展开
+示例。
+
+\begin{figure}
+\begin{lstlisting}
+(mvdo ((x 1 (1+ x))
+       ((y z) (values 0 0) (values z x)))
+      ((> x 5) (list x y z))
+  (princ (list x y z)))
+\end{lstlisting}
+展开成：
+\begin{lstlisting}
+(let (#:g2 #:g3 #:g4)
+  (mvpsetq #:g2 1
+           (#:g3 #:g4) (values 0 0))
+  (prog ((x #:g2) (y #:g3) (z #:g4))
+     #:g1
+     (if (> x 5)
+         (return (progn (list x y z))))
+     (princ (list x y z))
+     (mvpsetq x (1+ x)
+              (y z) (values z x))
+     (go #:g1)))
+\end{lstlisting}
+  \caption{\texttt{mvdo} 调用的展开}
+  \label{fig:expansion_of_a_call_to_mvdo}
+\end{figure}
+
+\section{需要宏的原因}
+\label{sec:need_for_macros}
+
+宏并不是保护参数免于求值的唯一方式。另一种方法
+是把它封装在闭包里。条件求值和重复求值的相似之处
+在于这两个问题在本质上都不需要宏。例如，我们可以将~\texttt{if} 写成函数：
+\begin{lstlisting}
+(defun fnif (test then &optional else)
+  (if test
+      (funcall then)
+      (if else (funcall else))))
+\end{lstlisting}
+我们可以把~\texttt{then} 和~\texttt{else} 参数表达成闭包，通过这种方式来保护它们，所以下面的表达式
+\begin{lstlisting}
+(if (rich) (go-sailing) (rob-bank))
+\end{lstlisting}
+可以改成
+\begin{lstlisting}
+(fnif (rich)
+      #'(lambda () (go-sailing))
+      #'(lambda () (rob-bank)))
+\end{lstlisting}
+如果我们要的只是条件求值，那么不用宏也一样可以。它们只是让程序更清晰罢了。不过，当我们
+需要拆开参数~form，或者为作为参数传入的变量绑定值时，就只能靠宏了。
+
+同样的道理也适用于那些用于迭代的宏。尽管只有宏才提供唯一的手段，可以用来定义带有表达式体的迭代控制结构，
+其实用函数来做迭代也是可能的，只要循环体被包装在那个函数里。\footnote{
+写一个不需要其参数封装在函数里的迭代函数也并非\emph{不可能}。我们可以写一个函数在作为
+其参数传递的表达式上调用~\texttt{eval}\index{eval@\texttt{eval}!explicit}。对于“为什么调用~\texttt{eval} 通常是有问题的”
+，可参见~\pageref{bad-eval} 页的解释。}%
+例如内置函数~\texttt{mapc}\index{mapc@\texttt{mapc}} 就是与~\texttt{dolist} 对应的函数式版本。表达式
+\begin{lstlisting}
+(dolist (b bananas)
+  (peel b)
+  (eat b))
+\end{lstlisting}
+和
+\begin{lstlisting}
+(mapc #'(lambda (b)
+          (peel b)
+          (eat b))
+      bananas)
+\end{lstlisting}
+有相同的副作用。(尽管前者返回~\verb|nil|，而后者返回~\verb|bananas| 列表)。
+或者，我们也可以把~\verb|forever| 实现成函数，
+\begin{lstlisting}
+(defun forever (fn)
+  (do ()
+      (nil)
+    (funcall fn)))
+\end{lstlisting}
+不过，前提是我们愿意传给它闭包而非表达式体。
+
+然而，迭代控制结构通常要做的工作会比简单的迭代更多，也就是比~\verb|forever| 更复杂：
+它们通常会把绑定和迭代合二为一。使用函数的话，绑定操作会很有局限。如果想把变量绑定到列表的后继元素上，
+那么用某种映射函数就可以。但如果需求比这个更复杂，你就不得不写一个宏了。
+
+%%% Local Variables:
+%%% coding: utf-8
+%%% mode: latex
+%%% TeX-master: "onlisp-cn"
+%%% End:

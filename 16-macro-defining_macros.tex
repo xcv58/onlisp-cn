@@ -1,0 +1,483 @@
+%!TEX encoding = UTF-8 Unicode
+% $Id: 16-macro-defining_macros.tex 17 2014-03-09 13:05:41Z binghe $
+
+\chapter{定义宏的宏}
+\label{chap:macro-defining_macros}
+\index{macros 宏!macro-defining}
+
+代码中的模式通常预示着需要新的抽象。这一规则对于宏代码本身也一样适用。如果几个宏的定义在形式上比较相似，
+我们就可能写一个编写宏的宏来产生它们。本章展示三个宏定义宏的例子：一个用来定义
+\abbrev{}，另一个用来定义访问宏，第三个则用来定义在~\ref{sec:anaphoric_variants} 节中
+介绍的那种指代宏。
+
+\section{\abbrev{}}
+\label{sec:abbreviations}
+
+宏最简单的用法就是作为\abbrev{}\index{macros 宏!as abbreviations}\index{abbreviations \abbrev{}}。一些~Common Lisp 操作符的名字相当之长\index{functions 函数!names of}。它们中最典型的
+~(尽管不是最长的) 是~\texttt{destructuring-bind}，长达~18 个字符。\note{213}
+Steele\index{Steele, Guy Lewis Jr.} 原则~(\pageref{guy_steele_rule} 页) 的一个直接推论是，常用的操作符应该取个简短
+的名字。(``我们认为加法的成本较低，部分原因是由于我们只要用一个字符~`\texttt{+}' 就可以表示它。'')
+内置的~\texttt{destructuring-bind} 宏引入了一个新的抽象层，但它在简洁上作出的贡献
+被它的长名字抹杀了：
+\begin{lstlisting}
+(let ((a (car x)) (b (cdr x))) ...)
+
+(destructuring-bind (a . b) x ...)
+\end{lstlisting}
+
+和打印出来的文本相似，程序在每行的字符数不超过~70 的时候，是最容易阅读的。当单个名字的长度达到这个长度的四分之一时，我们就开始觉得不便了。\index{visual aspects of source code 源代码在视觉感受上的一面}
+
+幸运的是，在像~Lisp 这样的语言里你完全没有必要逆来顺受设计者的每个决定。只要定义了
+\begin{lstlisting}
+(defmacro dbind (&rest args)
+  `(destructuring-bind ,@args))
+\end{lstlisting}
+你就再也不没必要用那个长长的名字了。对于名字更长也更常用的~\texttt{multiple-value-bind} 也是
+一样的道理。
+\begin{lstlisting}
+(defmacro mvbind (&rest args)
+  `(multiple-value-bind ,@args))
+\end{lstlisting}
+注意到~\texttt{dbind} 和~\texttt{mvbind} 的定义是何等的相似。确实，使用这种~\texttt{rest}
+和\commaat~的惯用法，就已经能为任意一个函数\footnote{尽管这种\abbrev{}不能传递给
+~\texttt{apply} 或者~\texttt{funcall}。}、宏，或者~special form 定义其\abbrev{}了。
+既然我们可以让一个宏帮我们代劳，为什么还老是照着~\texttt{mvbind} 的模样写出一个又一个
+的定义呢？
+
+为了定义一个定义宏的宏，我们通常会要用到嵌套的\bq{}\index{backquote@backquote (\texttt{`}) \bq{}!nested 嵌套}。嵌套\bq{}的难以理解是出了名的。尽管最终我们会对那些常见的情况了如指掌，但你不能指望随便挑一个\bq{}表达式，都能看一眼，就能立即说出它可以产生什么。
+这不能归罪于~Lisp。就像一个复杂的积分，没人能看一眼就得出积分的结果，但是我们不能因为这个就把问题归咎于积分的表示方法。道理是一样的。难点在于问题本身，而非表示问题的方法。
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro abbrev (short long)
+  `(defmacro ,short (&rest args)
+     `(,',long ,@args)))
+
+(defmacro abbrevs (&rest names)
+  `(progn
+     ,@(mapcar #'(lambda (pair)
+                   `(abbrev ,@pair))
+               (group names 2))))
+\end{lstlisting}
+  \caption{自动定义\abbrev{}}
+  \label{fig:automatic_definition_of_abbreviations}
+  \index{abbrev@\texttt{abbrev}}
+  \index{abbrevs@\texttt{abbrevs}}
+\end{figure}
+
+尽管如此，正如在我们在做积分的时候，我们同样也可以把对\bq{}的分析拆成多个小一些的步骤，让每一步都可以很容易地完成。
+假设我们想要写一个~\texttt{abbrev} 宏，它允许我们仅用
+\begin{lstlisting}
+(abbrev mvbind multiple-value-bind)
+\end{lstlisting}
+来定义~\texttt{mvbind}。图~\ref{fig:automatic_definition_of_abbreviations} 给出了一个
+这个宏的定义。它是怎样写出来的呢？这个宏的定义可以从一个示例展开式开始。一个展开式
+是：
+\begin{lstlisting}
+(defmacro mvbind (&rest args)
+  `(multiple-value-bind ,@args))
+\end{lstlisting}
+如果我们把~\texttt{multiple-value-bind} 从\bq{}里拉出来的话，就会让推导变得更容易些，因为我们知道
+它将成为最终要得到的那个宏的参数。这样就得到了等价的定义
+\begin{lstlisting}
+(defmacro mvbind (&rest args)
+  (let ((name 'multiple-value-bind))
+    `(,name ,@args)))
+\end{lstlisting}
+现在我们将这个展开式转化成一个模板。我们先把\bq{}放在前面，然后把可变的表达式替换成变量。
+\begin{lstlisting}
+`(defmacro ,short (&rest args)
+  (let ((name ',long))
+    `(,name ,@args)))
+\end{lstlisting}
+最后一步是通过把代表~\texttt{name} 的~\texttt{',long} 从内层\bq{}中消去，来简化表达式：
+\begin{lstlisting}
+`(defmacro ,short (&rest args)
+   `(,',long ,@args))
+\end{lstlisting}
+这就得到了图~\ref{fig:automatic_definition_of_abbreviations} 中定义的宏的主体。
+
+图~\ref{fig:automatic_definition_of_abbreviations} 中还有一个~\texttt{abbrevs}
+，它用于我们想要一次性定义多个\abbrev{}的场合.
+\begin{lstlisting}
+(abbrevs dbind  destructuring-bind
+         mvbind multiple-value-bind
+         mvsetq multiple-value-setq)
+\end{lstlisting}
+\texttt{abbrevs} 的用户无需插入多余的括号，因为~\texttt{abbrevs} 通过调用~\texttt{group}
+(\pageref{fun:group} 页) 来将其参数两两分组。对于宏来说，为用户节省逻辑上不必要的括号是件
+好事，而~\texttt{group} 对于多数这样的宏来说都是有用的。
+
+\section{属性}
+\label{sec:properties}
+
+Lisp 提供多种方式将属性和对象关联在一起。如果问题中的对象可以表示成符号，那么最便利~(尽管
+可能最低效) 的方式之一是使用符号的属性表\index{property lists 属性列表}。为了描述对象~$o$ 具有值为~$v$ 的属性~$p$
+的这一事实，我们修改~$o$ 的属性表：
+\begin{lstlisting}
+(setf (get $o$ $p$) $v$)
+\end{lstlisting}
+所以如果说~\texttt{ball1} 的~\texttt{color} 为~\texttt{red}，我们用：
+\begin{lstlisting}
+(setf (get 'ball1 'color) 'red)
+\end{lstlisting}
+如果我们打算经常引用对象的某些属性，我们可以定义一个宏来得到它：
+\begin{lstlisting}
+(defmacro color (obj)
+  `(get ,obj 'color))
+\end{lstlisting}
+然后在~\texttt{get} 的位置上使用~\texttt{color} 就可以了：
+\begin{lstlisting}
+> (color 'ball1)
+RED
+\end{lstlisting}
+由于宏调用对~\texttt{setf} 是透明的~(见第~\ref{chap:generalized_variables} 章)，
+我们也可以用：
+\begin{lstlisting}
+> (setf (color 'ball1) 'green)
+GREEN
+\end{lstlisting}
+
+这种宏会有如下优势：它能把程序表示对象颜色的方式隐藏起来\index{hiding implementation details}。属性表的访问速度比较慢；程序在将来的版本里，可能会出于速度考虑，将颜色表示成结构体的一个字段，或者哈希表中的一个表项。如果通过类似
+~\texttt{color} 宏这样的外部接口访问数据，我们可以很轻易地对底层代码做翻天覆地的改动，
+就算是已经成形的程序也不在话下。如果一个程序从属性表改成用结构体，那么在访问宏的外部接口以上的程序可以原封不动；甚至使用这个接口的代码可以根本就对背后的重构过程毫无察觉。
+
+对于重量这个属性，我们可以定义一个宏，它和为~\texttt{color} 写的那个宏差不多：
+\begin{lstlisting}
+(defmacro weight (obj)
+  `(get ,obj 'weight))
+\end{lstlisting}
+和上节的情况相似，\texttt{color} 和~\texttt{weight} 的定义几乎一模一样。在这里
+~\texttt{propmacro} (图~\ref{fig:automatic_definition_of_access_macros}) 扮演了
+和~\texttt{abbrev} 相同的角色。
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro propmacro (propname)
+  `(defmacro ,propname (obj)
+     `(get ,obj ',',propname)))
+
+(defmacro propmacros (&rest props)
+  `(progn
+     ,@(mapcar #'(lambda (p) `(propmacro ,p)
+               props))))
+\end{lstlisting}
+  \caption{自动定义访问宏}
+  \label{fig:automatic_definition_of_access_macros}
+  \index{propmacro@\texttt{propmacro}}
+  \index{propmacros@\texttt{propmacros}}
+  \index{macros 宏!access}
+\end{figure}
+
+一个用来定义宏的宏可以采用和任何其他宏相同的设计过程：先理解宏调用，然后分析预期的展开式，
+再想出来如何将前者转化成后者。我们想要
+\begin{lstlisting}
+(propmacro color)
+\end{lstlisting}
+被展开成
+\begin{lstlisting}
+(defmacro color (obj)
+  `(get ,obj 'color))
+\end{lstlisting}
+尽管这个展开式本身也是一个~\texttt{defmacro}，我们仍然能够为它做一个模
+板，先把它放到\bq{}里，然后把加了逗号的参数名放在~\texttt{color} 的实例的位置上。
+如同前一节那样，我们首先通过转化，让展开式已有的\bq{}里面没
+有~\texttt{color} 实例：
+\begin{lstlisting}
+(defmacro color (obj)
+  (let ((p 'color))
+    `(get ,obj ',p)))
+\end{lstlisting}
+然后我们接下来构造这个模板\index{backquote@backquote (\texttt{`}) \bq{}!nested 嵌套}：
+\begin{lstlisting}
+`(defmacro ,propname (obj)
+   (let ((p ',propname))
+     `(get ,obj ',p)))
+\end{lstlisting}
+再简化成：\note{217}
+\begin{lstlisting}
+`(defmacro ,propname (obj)
+   `(get ,obj ',',propname))
+\end{lstlisting}
+
+对于需要把一组属性名全部定义成宏的场合，还有~\texttt{propmacros}
+(图~\ref{fig:automatic_definition_of_access_macros})，它展开到一系列单独的对
+~\texttt{propmacro} 的调用。就像~\texttt{abbrevs}，这段不长的代码事实上是一个
+定义\emph{定义宏的宏}的宏。
+
+虽然本章针对的是属性表，但这里的技术是通用的。对于以任何形式保存的
+数据，我们都可以用它定义适用的数据访问宏。
+
+\section{指代宏}
+\label{sec:anaphoric_macros}
+
+第~\ref{sec:anaphoric_variants} 节已经给出了几种指代宏的定义。当你使用类似
+~\texttt{aif} 或者~\texttt{aand} 这样的宏时，在一些参数求值的过程中，符号~\texttt{it}
+将被绑定到其他参数返回的值上。所以，无需再用
+\begin{lstlisting}
+(let ((res (complicated-query)))
+  (if res
+      (foo res)))
+\end{lstlisting}
+只要说
+\begin{lstlisting}
+(aif (complicated-query)
+     (foo it))
+\end{lstlisting}
+就可以了，而
+\begin{lstlisting}
+(let ((o (owner x)))
+  (and o (let ((a (address o)))
+           (and a (city a)))))
+\end{lstlisting}
+则可以简化成
+\begin{lstlisting}
+(aand (owner x) (address it) (city it))
+\end{lstlisting}
+第~\ref{sec:anaphoric_variants} 节给出了七个指代宏：\texttt{aif}，
+\texttt{awhen}，\texttt{awhile}，\texttt{acond}，\texttt{alambda}，
+\texttt{ablock} 和~\texttt{aand}。这七个绝不是唯一有用的这种类型的指代宏。
+事实上，我们可以为任何~Common Lisp 函数或宏定义出对应的指代变形。
+这些宏中有许多的情况会和~\texttt{mapcon}\index{mapcon@\texttt{mapcon}} 很像：很少用到，可一旦需要就是不可替代的。
+
+例如，我们可以定义~\texttt{a+}，让它和~\texttt{aand} 一样，使~\texttt{it} 总是绑定到
+上个参数返回的值上。下面的函数用来计算在~Massachusetts 的晚餐开销：
+\begin{lstlisting}
+(defun mass-cost (menu-price)
+  (a+ menu-price (* it .05) (* it 3)))
+\end{lstlisting}
+Massachusetts 的餐饮税是~$5\%$，而顾客经常按照这个税的三倍来计算小费。按照这个公式计算的话，
+在~Dolphin 海鲜餐厅\index{Dolphin Seafood 海鲜餐厅}吃烤鳕鱼\index{scrod 鳕鱼}的费用共计：
+\begin{lstlisting}
+> (mass-cost 7.95)
+9.54
+\end{lstlisting}
+不过这里还包括了沙拉和一份烤土豆。
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro a+ (&rest args)
+  (a+expand args nil))
+
+(defun a+expand (args syms)
+  (if args
+      (let ((sym (gensym)))
+        `(let* ((,sym ,(car args))
+                (it ,sym))
+           ,(a+expand (cdr args)
+                      (append syms (list sym)))))
+      `(+ ,@syms)))
+
+(defmacro alist (&rest args)
+  (alist-expand args nil))
+
+(defun alist-expand (args syms)
+  (if args
+      (let ((sym (gensym)))
+        `(let* ((,sym ,(car args))
+                (it ,sym))
+           ,(alist-expand (cdr args)
+                          (append syms (list sym)))))
+      `(list ,@syms)))
+\end{lstlisting}
+  \caption{\texttt{a+} 和~\texttt{alist} 的定义}
+  \label{fig:definitions_of_aplus_and_alist}
+\end{figure}
+
+图~\ref{fig:definitions_of_aplus_and_alist} 中定义的~\verb|a+|，依赖于一个递归
+函数~\verb|a+expand|，来生成其展开式。\verb|a+expand| 的一般策略是对宏调用中的
+参数列表不断地求~cdr，同时生成一系列嵌套的~\verb|let| 表达式；每一个~\verb|let|
+都将~\verb|it| 绑定到不同的参数上，但同时也把每个参数绑定到一个不同的生成符号上。展开
+函数聚集出一个这些生成符号的列表，并且当到达参数列表的结尾时，它就返回一个以这些生成符号
+作为参数的~\verb|+| 表达式。所以表达式
+\begin{lstlisting}
+(a+ menu-price (* it .05) (* it 3))
+\end{lstlisting}
+得到了展开式：
+\begin{lstlisting}
+(let* ((#:g2 menu-price) (it #:g2))
+  (let* ((#:g3 (* it 0.05)) (it #:g3))
+    (let* ((#:g4 (* it 3)) (it #:g4))
+      (+ #:g2 #:g3 #:g4))))
+\end{lstlisting}
+
+图~\ref{fig:definitions_of_aplus_and_alist} 中还定义了一个类似的~\texttt{alist}：
+\begin{lstlisting}
+> (alist 1 (+ 2 it) (+ 2 it))
+(1 3 5)
+\end{lstlisting}
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro defanaph (name &optional calls)
+  (let ((calls (or calls (pop-symbol name))))
+    `(defmacro ,name (&rest args)
+       (anaphex args (list ',calls)))))
+
+(defun anaphex (args expr)
+  (if args
+      (let ((sym (gensym)))
+        `(let* ((,sym ,(car args))
+                (it ,sym))
+           ,(anaphex (cdr args)
+                     (append expr (list sym)))))
+      expr))
+
+(defun pop-symbol (sym)
+  (intern (subseq (symbol-name sym) 1)))
+\end{lstlisting}
+  \caption{自动定义指代宏}
+  \label{fig:automatic_definition_of_anaphoric_macros}
+  \index{defanaph@\texttt{defanaph}}
+  \index{pop-symbol@\texttt{pop-symbol}}
+\end{figure}
+
+历史重演了，\texttt{a+} 和~\texttt{alist} 的定义几乎完全一样。如果我们想要定义更多像它们那样
+的宏，这些宏也将在很大程度上大同小异。为什么不写一个程序，让它帮助我们产生这些宏呢？
+图~\ref{fig:automatic_definition_of_anaphoric_macros} 中的~\texttt{defanaph}
+将达到这个目的。借助~\texttt{defanaph}，宏~\texttt{a+} 和~\texttt{alist} 的定义过程
+可以简化成
+\begin{lstlisting}
+(defanaph a+)
+(defanaph alist)
+\end{lstlisting}
+这样定义出的~\texttt{a+} 和~\texttt{alist} 展开式将和
+图~\ref{fig:definitions_of_aplus_and_alist} 中的代码产生的展开式相同。这个用来定义
+宏的~\texttt{defanaph} 宏将为任何其参数按照正常函数求值规则来求值的东西创建出指代
+变形来。这就是说，\texttt{defanaph} 将适用于任何参数全部被求值，并且是从左到右求值的东西上。
+所以你不能用这个版本的~\texttt{defanaph} 来定义~\texttt{aand} 或~\texttt{awhile}，
+但你可以用它给任何函数定义出其指代版本。
+
+正如~\texttt{a+} 调用~\texttt{a+expand} 来生成其展开式，\texttt{defanaph} 所定义的
+宏也调用~\texttt{anaphex} 来做这个事情。通用展开器~\texttt{anaphex}
+跟~\texttt{a+expand} 的唯一不同之处在于其接受作为参数的函数名使其出现在最终的展开式里。
+事实上，\texttt{a+} 现在可以定义成：
+\begin{lstlisting}
+(defmacro a+ (&rest args)
+  (anaphex args '(+)))
+\end{lstlisting}
+无论~\texttt{anaphex} 还是~\texttt{a+expand} 都不需要被定义成单独的函数：
+\texttt{anaphex} 可以用~\texttt{labels} 或~\texttt{alambda} 定义在
+~\texttt{defanaph} 里面。这里把展开式生成器拆成分开的函数只是出于澄清的理由。
+
+默认情况下，\texttt{defanaph} 通过将其参数前面的第一个字母~(假设是一个~\texttt{a})
+拉出来以决定在最后的展开式里调用什么。(这个操作是由~\texttt{pop-symbol} 完成的。)
+如果用户更喜欢另外指定一个名字，它可以作为一个可选参数。尽管~\texttt{defanaph} 可以为
+所有函数和某些宏定义出其~anaphoric 变形，但它有一些令人讨厌的局限：
+\begin{enumerate}
+\item 它只能工作在其参数全部求值的操作符上。
+\item 在宏展开中，\texttt{it} 总被绑定在前一个参数上。在某些场合\pozhehao{}例如
+  ~\texttt{awhen}\pozhehao{}我们想要~\texttt{it} 始终绑在\emph{第一个}参数的值上。
+\item 它无法工作在像~\texttt{setf} 这种期望其第一个参数是\gv{}的宏上。
+\end{enumerate}
+
+让我们考虑一下如何在一定程度上打破这些局限。第一个问题的一部分可以通过解决第二个问题来解决。
+为了给类似~\texttt{aif} 的宏生成展开式，我们需要对~\texttt{anaphex} 加以修改，
+让它在宏调用中只替换第一个参数：
+\begin{lstlisting}
+(defun anaphex2 (op args)
+  `(let ((it ,(car args)))
+     (,op it ,@(cdr args))))
+\end{lstlisting}
+
+这个非递归版本的~\texttt{anaphex} 不需要确保宏展开式将~\texttt{it} 绑定到当前参数前面
+的那个参数上，所以它可以生成的展开式没有必要对宏调用中的所有参数求值。只有第一个参数是必须被求值
+的，以便将~\texttt{it} 绑定到它的值上。所以~\texttt{aif} 可以被定义成：
+\begin{lstlisting}
+(defmacro aif (&rest args)
+  (anaphex2 'if args))
+\end{lstlisting}
+这个定义和~\pageref{fig:anaphoric_variants_of_common_lisp_operators} 页上原来的
+定义相比，唯一的区别在于：之前那个版本里，如果你传给~\texttt{aif} 参数的个数不对的话，那程序会
+报错；如果调用宏的方法是正确的话，这两个版本将生成相同的展开式。
+
+至于第三个问题，也就是~\texttt{defanaph} 无法工作在\gv{}上的问题，可以通过在展开式中
+使用~\texttt{\_f} (\pageref{fig:more_complex_macros_on_setf} 页) 来解决。
+像~\texttt{setf} 这样的操作符可以被下面定义的~\texttt{anaphex2} 的变种来处理：
+\begin{lstlisting}
+(defun anaphex3 (op args)
+  `(_f (lambda (it) (,op it ,@(cdr args))) ,(car args)))
+\end{lstlisting}
+这个展开器假设宏调用必须带有一个以上的参数，其中第一个参数将是一个\gv{}。使用它我们可以这样
+定义~\texttt{asetf}\footnote{译者注：这里给出的~\texttt{asetf} 采用了原书勘误中
+  给出的形式。未勘误的版本里用
+  ~\texttt{'setf} 代替了~\texttt{'(lambda (x y) (declare (ignore x) y))}。
+  这个版本也是有效的，但其中的~\texttt{setf} 是不必要的，真正的\gv{}赋值操作是由背后的
+  ~\texttt{\_f} 宏完成的。比较一下后面给出~\texttt{incf} 宏在一个普通调用
+  ~\texttt{(incf a 1)} 下两种~\texttt{asetf} 产生的展开式就可以了解这点了。}
+  \footnote{译者注：本书中所有忽略了某些形参的函数定义都由译者添加了类似~\texttt{(declare (ignore char))} 
+  的声明以免编译器报警。}：
+\begin{lstlisting}
+(defmacro asetf (&rest args)
+  (anaphex3 '(lambda (x y) (declare (ignore x)) y) args))
+\end{lstlisting}
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro defanaph (name &key calls (rule :all))
+  (let* ((opname (or calls (pop-symbol name)))
+         (body (case rule
+                 (:all   `(anaphex1 args '(,opname)))
+                 (:first `(anaphex2 ',opname args))
+                 (:place `(anaphex3 ',opname args)))))
+    `(defmacro ,name (&rest args)
+       ,body)))
+
+(defun anaphex1 (args call)
+  (if args
+      (let ((sym (gensym)))
+        `(let* ((,sym ,(car args))
+                (it ,sym))
+           ,(anaphex1 (cdr args)
+                      (append call (list sym)))))
+      call))
+
+(defun anaphex2 (op args)
+  `(let ((it ,(car args))) (,op it ,@(cdr args))))
+
+(defun anaphex3 (op args)
+  `(_f (lambda (it) (,op it ,@(cdr args))) ,(car args)))
+\end{lstlisting}
+  \caption{更一般的~\texttt{defanaph}}
+  \label{fig:more_general_defanaph}
+  \label{macro:defanaph}
+\end{figure}
+
+图~\ref{fig:more_general_defanaph} 显示了所有三个展开器函数在单独一个宏
+~\texttt{defanaph} 的控制下拼接在一起的结果。用户可以通过可选的~\texttt{rule} 关键字
+参数来设置目标宏展开的类型，这个参数指定了在宏调用中参数所采用的求值规则。如果这个参数是：
+\begin{description}
+\item[\texttt{:all}]
+  (默认值) 宏展开将采用~\texttt{alist} 模型。宏调用中所有参数都将被求值，
+  同时~\texttt{it} 总是被绑定在前一个参数的值上。
+\item[\texttt{:first}]
+  宏展开将采用~\texttt{aif} 模型。只有第一个参数是必须求值的，并且~\texttt{it}
+  将被绑定在这个值上。
+\item[\texttt{:place}]
+  宏展开将采用~\texttt{asetf} 模型。第一个参数被按照\gv{}来对待，而~\texttt{it}
+  将被绑定在它的初始值上。
+\end{description}
+使用新的~\texttt{defanaph}，前面的一些例子将被定义成下面这样：
+\begin{lstlisting}
+(defanaph alist)
+(defanaph aif :rule first)
+(defanaph asetf :rule :place)
+\end{lstlisting}
+
+\texttt{asetf}\index{asetf@\texttt{asetf}} 的一大优势是它可以定义出一大类基于\gv{}而不必担心多重求值问题的宏。例如，
+我们可以将~\texttt{incf} 定义成：
+\begin{lstlisting}
+(defmacro incf (place &optional (val 1))
+  `(asetf ,place (+ it ,val)))
+\end{lstlisting}
+再比如说~\texttt{pull} (\pageref{fig:more_complex_macros_on_setf} 页)：
+\begin{lstlisting}
+(defmacro pull (obj place &rest args)
+  `(asetf ,place (delete ,obj it ,@args)))
+\end{lstlisting}
+
+%%% Local Variables:
+%%% coding: utf-8
+%%% mode: latex
+%%% TeX-master: "onlisp-cn"
+%%% End:

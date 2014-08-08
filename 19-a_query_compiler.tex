@@ -1,0 +1,513 @@
+%!TEX encoding = UTF-8 Unicode
+% $Id: 19-a_query_compiler.tex 18 2014-03-12 22:35:24Z binghe $
+
+\chapter{一个查询编译器}
+\label{chap:a_query_compiler}
+
+在前面章节里定义的有些宏很长。为了生成展开式，\texttt{if-match} 需要用到图
+~\ref{fig:fast_matching_operator} 和~\ref{fig:fast_matching_operator_continued}
+中的所有代码，以及图~\ref{fig:general_sequence_destructuring_operator} 中的
+~\texttt{destruc}。如此之长的宏自然而然地将我们带入最后一个主题：嵌入式语言\index{embedded languages}。
+如果说短小的宏是~Lisp 的扩展，那么大的宏就是在其中定义子语言\pozhehao{}可能带有它们自己的语法
+或者控制结构。我们在~\texttt{if-match} 中看出了些端倪，在这个宏里，它有自己的一套表达变量的方式。
+
+我们把实现在~Lisp 中的语言称为\emph{嵌入式语言}。和~``\utility'' 一样，这个术语并没有
+严格的定义；\texttt{if-match} 可能仍算是\utility，但它已经开始有一点嵌入式语言的意思了\index{embedded languages!borderline of}。
+
+嵌入式语言和那些用传统的编译器或解释器实现的语言截然不同。它是用某种现有的语言实现的，实现的方式
+通常是采用转换。没有必要在基语言和它的扩展之间制造人为的隔阂：可以将两者自由地混用在一起。
+对于实现者来说，这意味着可以省下大量精力。你可以让你想要的部分实现成嵌入的，而让其余的部分使用基语言。
+
+转换，在~Lisp 里，意味着使用宏。在某种程度上，你可以用预处理器来实现嵌入式语言。但预处理器
+通常只能操作文本，而宏却可以利用~Lisp 的一个独一无二的特性：在读取器和编译器之间，你的~Lisp 程序
+被表达成~Lisp 对象的列表。在这个阶段进行转换要更自如一些。
+
+最著名的嵌入式语言例子是~\textsc{clos}，即~Common Lisp Object System。如果你想要把一个普通的
+语言改造成面向对象的版本，那只能写一个新的编译器。在~Lisp 里就不是这样了。调整编译器
+将使~\textsc{clos} 跑得更快，而在理论上，编译器不需要有丝毫改变。这一整套系统都可以用~Lisp 写出来。
+
+接下来的章节会给出几个嵌入式语言的例子。本章将描述如何将一个回答数据库查询\index{databases 数据库!queries on 查询}的程序嵌入到~Lisp 中。(你将会注意到这个程序和~\texttt{if-match} 有一系列相通的地方。) 第一节将介绍如何写一个系统，
+该系统用于解释查询语句。之后，这个程序被重新实现成一个查询编译器，实质上，是实现成了一个巨大的宏\pozhehao{}这既使程序更加高效，也让它能更好地与~Lisp 集成。
+
+\section{数据库}
+\label{sec:the_database}
+
+鉴于当前的目的，数据库的形式并不是关键。所以，这里出于方便起见把信息保存在列表里\index{lists!as facts}。
+例如，我们将~``Joshua Reynolds 是一位生活于~1723 至~1792 年的英国画家'' 这个事实表示\index{databases 数据库!representation of 的形式}成：
+\begin{lstlisting}
+(painter reynolds joshua english)
+(dates reynolds 1723 1792)
+\end{lstlisting}
+把信息压缩表示成列表，并无标准办法可循。我们可以依法炮制，也干脆用一个大列表：
+\begin{lstlisting}
+(painter reynolds joshua 1723 1792 english)
+\end{lstlisting}
+组织数据库表项的方式由用户来决定。唯一的限制是这些项目~(\emph{事实}) 将用其第一个元素~(\emph{谓词}) 来
+索引。在这些约束下，任何一致的形式都可以工作，尽管某些形式的查询速度更快些。
+
+\begin{figure}
+\begin{lstlisting}
+(defun make-db (&optional (size 100))
+  (make-hash-table :size size))
+
+(defvar *default-db* (make-db))
+
+(defun clear-db (&optional (db *default-db*))
+  (clrhash db))
+
+(defmacro db-query (key &optional (db '*default-db*))
+  `(gethash ,key ,db))
+
+(defun db-push (key val &optional (db *default-db*))
+  (push val (db-query key db)))
+
+(defmacro fact (pred &rest args)
+  `(progn (db-push ',pred ',args)
+          ',args))
+\end{lstlisting}
+  \caption{基本的数据库函数}
+  \label{fig:basic_database_functions}
+\end{figure}
+
+任何数据库系统都至少要支持两种操作：修改数据库，和查询数据库。
+图~\ref{fig:basic_database_functions} 中给出的代码以一个基本的形式提供了这些操作。
+数据库由一张哈希表\index{hash tables 哈希表}表示，表项则是一个个事实，事实的谓词作为哈希表的键值。
+
+尽管图~\ref{fig:basic_database_functions} 中定义的数据库函数支持多个数据库，
+但它们默认的操作对象都是~\verb|*default-db*|。作为~Common Lisp 里的包，那些不需要操作
+多个数据库的程序甚至不需要关心它们。在本章所有的例子将只用到~\texttt{*default-db*}。
+
+我们调用~\texttt{clear-db}，初始化系统，这个命令会清空当前数据库。
+我们通过给~\texttt{db-query} 一个谓词来查询事实，并用~\texttt{db-push} 将新事实
+插入到一个数据库项里。正如第~\ref{sec:gv:the_concept} 节里解释的那样，一个展开成可逆
+引用的宏其自身也将是可逆的。由于~\texttt{db-query} 就是以这种方式定义的，所以我们可以
+简单地在谓词的~\texttt{db-query} 上~push 新事实。在~Common Lisp 里，除非特别指定，
+哈希表中的项被初始化为~\texttt{nil}，这样任何~key 在初始时都会有一个空列表与之关联。
+最后，\texttt{fact} 宏用来给数据库加入新事实。
+\begin{lstlisting}
+> (fact painter reynolds joshua english)
+(REYNOLDS JOSHUA ENGLISH)
+> (fact painter canale antonio venetian)
+(CANALE ANTONIO VENETIAN)
+> (db-query 'painter)
+((CANALE ANTONIO VENETIAN)
+ (REYNOLDS JOSHUA ENGLISH))
+T
+\end{lstlisting}
+其中，\verb|t| 是~\texttt{db-query} 返回的第二个值。而~\verb|db-query| 会展开成~\texttt{gethash}，
+后者则把它返回的第二个值作为标记，以区别两种情况：即没有发现项目，和发现了一个值为~\texttt{nil} 的项目。
+
+\section{模式匹配查询}
+\label{sec:pattern-matching_queries}
+
+之前用~\texttt{db-query} 来查询数据库中的数据，其实这种方式不是很灵活。通常用户会想要问的问题
+不会单单依赖事实的第一个元素。所谓\emph{查询语言}\index{query languages 查询语言}就是一种用来表达更复杂查询的语言。
+在一个典型的查询语言里，用户可以询问所有满足某些约束组合的值\pozhehao{}例如，所有生于~1697
+年的画家的姓氏。
+
+我们的程序将提供一种声明式的查询语言。在这种查询语言中，由用户指定答案必须满足的约束，
+而把如何生成答案的麻烦事留给系统。这样表达查询和人们日常会话中的方式很类似。对于我们的
+程序，我们可以要求系统找出所有这样的~$x$：存在一个~\texttt{(painter $x$ ...)} 形式的事实，
+以及一个~\texttt{(dates $x$ 1697 ...)} 形式的事实，以此来表达这个例子查询。如此，就能通过
+下面这个查询来引用所有生于~1697 年的画家：
+\begin{lstlisting}
+(and (painter ?x ?y ?z)
+     (dates ?x 1697 ?w))
+\end{lstlisting}
+我们的程序不但接受由谓词和一些参数组成的简单查询，还将能够回答由~\texttt{and} 和
+~\texttt{or} 这些逻辑操作符连接而成的任意复杂查询\index{queries 查询!complex 复杂的}。图
+~\ref{fig:syntax_of_queries} 中给出了查询语言的语法。
+
+\begin{figure}
+  \begin{tabular}{ll}
+    $\langle\mathrm{query}\rangle$ & \texttt{: ($\langle\mathrm{symbol}\rangle$ $\langle\mathrm{argument}\rangle$*)} \\
+    & \texttt{: (not $\langle\mathrm{query}\rangle$)} \\
+    & \texttt{: (and $\langle\mathrm{query}\rangle$*)} \\
+    & \texttt{: (or $\langle\mathrm{query}\rangle$*)} \\
+    $\langle\mathrm{argument}\rangle$ & \texttt{: ?$\langle\mathrm{symbol}\rangle$} \\
+    & \texttt{: $\langle\mathrm{symbol}\rangle$} \\
+    & \texttt{: $\langle\mathrm{number}\rangle$}
+  \end{tabular}
+  \caption{查询语法}
+  \label{fig:syntax_of_queries}
+\end{figure}
+
+由于事实是用它们的谓词来索引的，所以变量不能出现在谓词的位置上。如果你愿意放弃索引\index{indexing}带来的
+好处，你可以通过总是使用相同的谓词，并且使第一个参数成为\emph{事实上的标准}谓词来绕过
+这个限制。
+
+和许多类似的系统一样，这个程序对于真值采取怀疑论的观点\index{closed world assumption 封闭世界假定}：
+除了已知的事实之外，其他所有陈述都是错误的\index{negation!of facts}。如果问题中的事实不在数据库里，
+\texttt{not} 操作符就会成功。某种程度上，你可以使用~\emph{Wayne's World}
+\footnote{译者注：Wayne's World 是上世纪~90 年代~NBC 拍摄的系列短剧，后被改编为电影，
+中文名为《反斗智多星》。其中的角色经常用类似~``这是历史的巧合，才怪！'' 的方式表达否定和挖苦的情绪。
+该剧让这种故意搞怪的表达方式在北美变得流行起来。} 的方式显式地表达逻辑假：
+\begin{lstlisting}
+(edible motor-oil not)
+\end{lstlisting}
+就算这样，\texttt{not} 操作符也不会对这些事实另眼相待。
+
+在编程语言里，解释性和编译性的程序之间有着根本的区别。在本章实现查询的时候，我们也将体会到这一点。
+查询解释器接受查询，并根据它从数据库里生成答案。而查询编译器接受查询，然后
+生成一个\emph{程序}，当这个程序运行时，会得出相同的结果。接下来几节里，会先描述一个查询解释器，
+然后再实现一个查询编译器。
+
+\section{一个查询解释器}
+\label{sec:a_query_interpreter}
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro with-answer (query &body body)
+  (let ((binds (gensym)))
+    `(dolist (,binds (interpret-query ',query))
+       (let ,(mapcar #'(lambda (v)
+                         `(,v (binding ',v ,binds)))
+                     (vars-in query #'atom))
+         ,@body))))
+
+(defun interpret-query (expr &optional binds)
+  (case (car expr)
+    (and (interpret-and (reverse (cdr expr)) binds))
+    (or  (interpret-or (cdr expr) binds))
+    (not (interpret-not (cadr expr) binds))
+    (t   (lookup (car expr) (cdr expr) binds))))
+
+(defun interpret-and (clauses binds)
+  (if (null clauses)
+      (list binds)
+      (mapcan #'(lambda (b)
+                  (interpret-query (car clauses) b))
+              (interpret-and (cdr clauses) binds))))
+
+(defun interpret-or (clauses binds)
+  (mapcan #'(lambda (c)
+              (interpret-query c binds))
+          clauses))
+
+(defun interpret-not (clause binds)
+  (if (interpret-query clause binds)
+      nil
+      (list binds)))
+
+(defun lookup (pred args &optional binds)
+  (mapcan #'(lambda (x)
+              (aif2 (match x args binds) (list it)))
+          (db-query pred)))
+\end{lstlisting}
+  \caption{查询解释器}
+  \label{fig:query_interpreter}
+  \index{with-answer@\texttt{with-answer}}
+\end{figure}
+
+为了实现一个声明式的查询语言，我们将使用在第~\ref{sec:destructuring:matching}
+节定义的模式匹配工具。图~\ref{fig:query_interpreter} 中的函数可
+以解释图~\ref{fig:syntax_of_queries} 那种形式的查询。这段代码里的核心
+函数是~\texttt{interpret-query}，它递归地对复杂查询的数据结构进行处理，在这
+个过程中生成绑定。复杂查询的求值按从左到右的顺序进行，就像~Common Lisp 本身那样。
+
+当递归进行到代表事实的模式上时，\texttt{interpret-query} 调
+用~\texttt{lookup}。这里正是模式匹配发生的地方。函数~\texttt{lookup}
+接受一个由谓词及其参数列表所组成的模式，然后返回一个能够使模式匹配到数据库
+中某个事实的所有绑定的列表。它首先获取所有该谓词的数据库表项，然后调
+用~\texttt{match} (\ref{fig:matching_function} 页) 把它们和
+模式逐一比较。每当匹配成功，就返回一个绑定列表，然后~\texttt{lookup} 返
+回一个含有所有这些列表的列表。
+\begin{lstlisting}
+> (lookup 'painter '(?x ?y english))
+(((?Y . JOSHUA) (?X . REYNOLDS)))
+\end{lstlisting}
+
+\begin{figure}
+\begin{lstlisting}
+(clear-db)
+(fact painter hogarth william english)
+(fact painter canale antonio venetian)
+(fact painter reynolds joshua english)
+(fact dates hogarth 1697 1772)
+(fact dates canale 1697 1768)
+(fact dates reynolds 1723 1792)
+\end{lstlisting}
+  \caption{一些作为示例的事实断言}
+  \label{fig:assertion_of_sample_facts}
+\end{figure}
+
+然后，这些结果会根据旁边的逻辑操作符或被滤除，或被组合。最终的结果将以列表的形式返回，
+其中，列表的元素是绑定的集合。如果用图~\ref{fig:assertion_of_sample_facts} 中所给出的断言，
+那么下面是本章先前例子对应的结果：
+\begin{lstlisting}
+> (interpret-query '(and (painter ?x ?y ?z)
+                         (dates ?x 1697 ?w)))
+(((?W . 1768) (?Z . VENETIAN) (?Y . ANTONIO) (?X . CANALE))
+ ((?W . 1772) (?Z . ENGLISH) (?Y . WILLIAM) (?X . HOGARTH)))
+\end{lstlisting}
+这是一个普适的原则，即查询可以无限制地组合和嵌套。在少数情况下，查询语法
+会有一些细微的限制，但分析完一些例子，了解了这部分代码的用法之后，
+我们就能很从容地处理这些问题了。
+
+% XXX
+宏~\texttt{with-answer} 提供了一个在~Lisp 程序里使用这个查询解释器的清爽简洁
+的方法。它的第一个参数可以是任意合法的查询；其余参数被视为一个代码体。
+\texttt{with-answer} 会展开成这样的代码，它收集由查询生成的所有绑
+定的集合，然后用每个绑定集合所指定的变量来迭代整个代码体。出现在一
+个~\texttt{with-answer} 的查询里的变量~(通常) 可以在其代码体里使用。当
+查询成功但却不含有变量时，\texttt{with-answer} 只求值代码体一次。
+
+\begin{figure}
+  \emph{每一个名字叫~Hogarth 的画家的姓氏和国籍。}
+\begin{lstlisting}
+> (with-answer (painter hogarth ?x ?y)
+    (princ (list ?x ?y)))
+(WILLIAM ENGLISH)
+NIL
+\end{lstlisting}
+  \emph{每一个生于~1697 年的画家的姓氏。(我们最初的例子)}
+\begin{lstlisting}
+> (with-answer (and (painter ?x _ _)
+                    (dates ?x 1697 _))
+    (princ (list ?x)))
+(CANALE)(HOGARTH)
+NIL
+\end{lstlisting}
+  \emph{每一个卒于~1772 年或者~1792 年的人的姓氏和出生年份。}
+\begin{lstlisting}
+> (with-answer (or (dates ?x ?y 1772)
+                   (dates ?x ?y 1792))
+    (princ (list ?x ?y)))
+(HOGARTH 1697)(REYNOLDS 1723)
+NIL
+\end{lstlisting}
+  \emph{每一个不和某个威尼斯画家生于同年的英国画家的姓氏。}
+\begin{lstlisting}
+> (with-answer (and (painter ?x _ english)
+                    (dates ?x ?b _)
+                    (not (and (painter ?x2 _ venetian)
+                              (dates ?x2 ?b _))))
+    (princ ?x))
+REYNOLDS
+NIL
+\end{lstlisting}
+  \caption{使用查询解释器}
+  \label{fig:the_query_interpreter_in_use}
+\end{figure}
+
+根据定义在图~\ref{fig:assertion_of_sample_facts} 中的数据库，
+图~\ref{fig:the_query_interpreter_in_use} 中罗列了一些带中文翻译的查询作例子。
+因为模式匹配是由~\texttt{match} 完成的，因此在模式中可以使用下
+划线\index{\_@\texttt{\_}}作为通配符。
+
+为了让这些例子不至于太长，查询的代码体中的代码仅仅打印了查询结果。
+一般而言，\texttt{with-answer} 的代码体中可以由任何~Lisp 表达式构成。
+
+\section{绑定上的限制}
+\label{sec:restrictions_on_binding}
+
+对于哪些变量将会被一个查询所绑定这个问题上存在一些限制。例如，为什么下
+列查询\index{negation!of queries}
+\begin{lstlisting}
+(not (painter ?x ?y ?z))
+\end{lstlisting}
+应该将任何绑定赋值给~\texttt{?x} 和~\texttt{?y} 呢？存在无限多
+种\emph{不是}某个画家名字的~\texttt{?x} 和~\texttt{?y} 的组合。因此
+我们加了一个限制：\texttt{not} 操作符将过滤掉那些已生成的绑定，例如
+这里
+\begin{lstlisting}
+(and (painter ?x ?y ?z) (not (dates ?x 1772 ?d)))
+\end{lstlisting}
+但你不能指望它会全自动地生成绑定。我们在生成绑定集合的时候，必须先找出所有的
+画家，然后再排除那些没有生于~1772 年的。要是我们写子句的顺序相反：
+\begin{lstlisting}[escapechar=\@]
+(and (not (dates ?x 1772 ?d)) (painter ?x ?y ?z))       @\hfill@; wrong
+\end{lstlisting}
+那么，只要存在\emph{任何}生于~1772 年的画家，结果将是~\texttt{nil}。
+即使在第一个例子里，我们也不该认为可以在~\texttt{with-answer} 表达式的代码体里使用~\texttt{?d} 的值。
+
+同样，形如~\texttt{(or $q_1$ $\ldots$ $q_n$)} 的表达式只保证可以实际生
+成那些出现在所有~$q_i$ 里的变量的绑定。如果一个~\texttt{with-answer}
+包含了查询
+\begin{lstlisting}
+(or (painter ?x ?y ?z) (dates ?x ?b ?d))
+\end{lstlisting}
+你可以预期~\verb|?x| 的绑定是可用的，因为无论哪一个子查询成功了，它都会
+生成一个~\texttt{?x} 的绑定。但不管是~\texttt{?y} 还是~\texttt{?b}
+都不保证可以从查询中得到绑定，尽管它其中一个子查询可以。没有被查
+询绑定的模式变量在迭代时将是~\texttt{nil}。\note{254}
+
+\section{一个查询编译器}
+\label{sec:a_query_compiler}
+
+图~\ref{fig:query_interpreter} 中的代码实现了我们想要的功能，但效率不彰。
+首先，尽管查询结构在编译期就是已知的，程序还是把分析工作放在了运行期完成。其次，
+程序通过构造列表来保存变量绑定，其实，本可以用变量来保存它们自己的值的。
+我们不妨换一种方式定义~\texttt{with-answer}，同时解决这两个问题。
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro with-answer (query &body body)
+  `(with-gensyms ,(vars-in query #'simple?)
+     ,(compile-query query `(progn ,@body))))
+
+(defun compile-query (q body)
+  (case (car q)
+    (and  (compile-and (cdr q) body))
+    (or   (compile-or  (cdr q) body))
+    (not  (compile-not (cadr q) body))
+    (lisp `(if ,(cadr q) ,body))
+    (t    (compile-simple q body))))
+
+(defun compile-simple (q body)
+  (let ((fact (gensym)))
+    `(dolist (,fact (db-query ',(car q)))
+       (pat-match ,(cdr q) ,fact ,body nil))))
+
+(defun compile-and (clauses body)
+  (if (null clauses)
+      body
+      (compile-query (car clauses)
+                     (compile-and (cdr clauses) body))))
+
+(defun compile-or (clauses body)
+  (if (null clauses)
+      nil
+      (let ((gbod (gensym))
+            (vars (vars-in body #'simple?)))
+        `(labels ((,gbod ,vars ,body))
+           ,@(mapcar #'(lambda (cl)
+                         (compile-query cl `(,gbod ,@vars)))
+                     clauses)))))
+
+(defun compile-not (q body)
+  (let ((tag (gensym)))
+    `(if (block ,tag
+           ,(compile-query q `(return-from ,tag nil))
+           t)
+         ,body)))
+\end{lstlisting}
+  \caption{查询编译器}
+  \label{fig:query_compiler}
+  \index{with-answer@\texttt{with-answer}!redefined}
+\end{figure}
+
+% xxxxxx
+
+图~\ref{fig:query_compiler} 定义了一个新版的~\texttt{with-answer}。这个新的实现秉承了一个传统，它始于~\texttt{avg} (\pageref{fig:shifting_computation_when_finding_averages} 页)，在~\texttt{if-match} (\pageref{macro:if-match} 页) 继承了下来：新的实现在编译期完成了原来旧版本在运行期的大部分工作。图~\ref{fig:query_compiler} 和图~\ref{fig:query_interpreter} 中的代码貌似一模一样，但前者中的函数无一是在运行期调用的。这些函数不再生成绑定，它们直接生成代码，而这些生成的代码将成为~\texttt{with-answer} 展开式的一部分。在运行期，这些代码将根据当前数据库的状态，产生满足查询要求的绑定。
+
+\begin{figure}
+\begin{lstlisting}
+(with-answer (painter ?x ?y ?z)
+  (format t "~A ~A is a painter.~%" ?y ?x))
+\end{lstlisting}
+被解释器展开成：
+\begin{lstlisting}
+(dolist (#:g1 (interpret-query '(painter ?x ?y ?z)))
+  (let ((?x (binding '?x #:g1))
+        (?y (binding '?y #:g1))
+        (?z (binding '?z #:g1)))
+    (format t "~A ~A is a painter.~%" ?y ?x)))
+\end{lstlisting}
+而被编译器展开成：
+\begin{lstlisting}
+(with-gensyms (?x ?y ?z)
+  (dolist (#:g1 (db-query 'painter))
+    (pat-match (?x ?y ?z) #:g1
+      (progn
+        (format t "~A ~A is a painter.~%" ?y ?x))
+      nil)))
+\end{lstlisting}
+  \caption{同一查询的两个展开式}
+  \label{fig:two_expansions_of_the_same_query}
+\end{figure}
+
+从效果上来看，这个程序是一个巨大的宏。
+图~\ref{fig:two_expansions_of_the_same_query} 中显示了~\texttt{with-answer} 宏展开后的模样。
+大多数的工作是由~\texttt{pat-match}
+(\pageref{fig:fast_matching_operator} 页) 完成的，它本身也是一个宏。现在，
+运行期需要的新函数就只有图~\ref{fig:basic_database_functions} 中给出的
+基本的数据库函数了。
+
+虽然在~toplevel 下调用~\texttt{with-answer}，对查询进行编译处理几乎没什么好处。
+表示查询的代码被生成，求值，然后就被扔在一边。但是当~\texttt{with-answer} 表达式
+出现在~Lisp 程序里的时候，表示查询的
+代码就成为了其宏展开的一部分。这样，当编译包含查询的程序时，所有的查询代
+码都将在这个过程中被内联~(inline) 编译。
+
+尽管这个新方法的主要优势是性能，但它也让~\verb|with-answer| 表达式更
+好地融入了它所在的代码。这具体表现在两个改进上。首先，查询中的参数
+现在被求值了，所以我们可以说：
+\begin{lstlisting}
+> (setq my-favorite-year 1723)
+1723
+> (with-answer (dates ?x my-favorite-year ?d)
+    (format t "~A was born in my favorite year.~%" ?x))
+REYNOLDS was born in my favorite year.
+NIL
+\end{lstlisting}
+虽然在查询解释器里同样可以做到这点，但代价是必须显式调用~\texttt{eval}。
+而且即便如此，在查询参数中还是无法引用词法变量。
+
+\begin{figure}
+  \emph{每一个名字叫~Hogarth 的画家的姓氏和国籍。}
+\begin{lstlisting}
+> (with-answer (painter 'hogarth ?x ?y)
+    (princ (list ?x ?y)))
+(WILLIAM ENGLISH)
+NIL
+\end{lstlisting}
+  \emph{每一个不跟某个威尼斯画家生于同年的英国画家的姓氏。}
+\begin{lstlisting}
+> (with-answer (and (painter ?x _ 'english)
+                    (dates ?x ?b _)
+                    (not (and (painter ?x2 _ 'venetian)
+                              (dates ?x2 ?b _))))
+    (princ ?x))
+REYNOLDS
+NIL
+\end{lstlisting}
+  \emph{每一个死于~1770 年到~1800 年开区间的画家的姓氏和死亡年份。}
+\begin{lstlisting}
+> (with-answer (and (painter ?x _ _)
+                    (dates ?x _ ?d)
+                    (lisp (< 1770 ?d 1800)))
+    (princ (list ?x ?d)))
+(REYNOLDS 1792)(HOGARTH 1772)
+NIL
+\end{lstlisting}
+  \caption{使用查询编译器}
+  \label{fig:the_query_compiler_in_use}
+\end{figure}
+
+由于现在查询中的参数都会被求值，所以任何不会求值到其自身的字面参数~(例
+如~\texttt{english}) 都应该被引用起来。(见
+图~\ref{fig:the_query_compiler_in_use})
+
+新方法的第二个优点是：它现在可以更容易地在查询中包含普通的~Lisp 表达式。
+查询编译器增加了一个~\texttt{lisp} 操作符，它可以跟任意~Lisp 表达
+式。就像~\texttt{not} 操作符那样，它不会生成任何绑定，但它将排除那些
+使表达式返回~\texttt{nil} 的绑定。在需要使用诸如~\texttt{>} 的内置谓词时，
+\texttt{lisp} 操作符就能帮上忙：
+\begin{lstlisting}
+> (with-answer (and (dates ?x ?b ?d)
+                    (lisp (> (- ?d ?b) 70)))
+    (format t "~A lived over 70 years.~%" ?x))
+CANALE lived over 70 years.
+HOGARTH lived over 70 years.
+\end{lstlisting}
+
+一个实现良好的嵌入式语言可以跟基语言在这两方面都结合得天衣无缝。
+
+除了这两个附加特性以外\pozhehao{}参数的求值以及新的~\texttt{lisp} 操作符
+\pozhehao{}查询编译器和查询解释器支持的查询语言是完全相同的。
+图~\ref{fig:the_query_compiler_in_use} 显示了有查询编译器用
+图~\ref{fig:assertion_of_sample_facts} 中定义的数据库所生成的示例结果。
+
+%% xxx 这里怀疑是作者笔误，给出两个编译理由的绝对不是 17.2 节。
+我们曾提到，把表达式编译后再求值，比将其作为列表送给~\texttt{eval} 更胜一筹。
+第~\ref{sec:dispatching_macro_characters} 节对个中原委解释了两点。前者更快，而且允许
+表达式在外围的词法上下文中进行求值。对查询加以编译的优点与之非常相似。通常要
+在运行期做的事现在在编译期就完成了。而且因为这些查询在编译后和周围
+的~Lisp 代码成为了一体，所以它们得以利用词法上下文。
+
+%%% Local Variables:
+%%% coding: utf-8
+%%% mode: latex
+%%% TeX-master: "onlisp-cn"
+%%% End:

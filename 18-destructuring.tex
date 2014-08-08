@@ -1,0 +1,726 @@
+%!TEX encoding = UTF-8 Unicode
+% $Id: 18-destructuring.tex 18 2014-03-12 22:35:24Z binghe $
+
+\chapter{解构}
+\label{chap:destructuring}
+
+解构~(destructuring) 是赋值的一般形式。操作符~\texttt{setq} 和~\texttt{setf} 的赋值对象只是
+独立的变量。而解构把赋值和访问操作合二为一：在这里，我们不再只是把单个变量作为第一个参数，而是给出一个关于变量的模式，
+在这个模式中，赋给每个变量的值将来自某个结构中对应的位置。
+
+\section{列表上的解构}
+\label{destructuring_on_lists}
+\index{destructuring!on lists}
+
+从~\textsc{cltl}2 开始，Common Lisp 包括了一个名为~\texttt{destructuring-bind}
+的新宏。这个宏在第~\ref{chap:macros} 章里简单介绍过。
+这里将更仔细地了解它。假设~\texttt{lst} 是一个三元素列表，而我们想要绑定~\texttt{x}
+到第一个元素，\texttt{y} 到第二个，\texttt{z} 到第三个。在原始~\textsc{cltl}1
+的~Common Lisp 里，只能这样表达：
+\begin{lstlisting}
+(let ((x (first lst))
+      (y (second lst))
+      (z (third lst)))
+  ...)
+\end{lstlisting}
+借助新宏我们只需说：
+\begin{lstlisting}
+(destructuring-bind (x y z) lst
+  ...)
+\end{lstlisting}
+这样处理，既短小，又清楚。
+读者对于视觉形象的感受力比单纯的文字要敏锐很多\index{visual aspects of source code 源代码在视觉感受上的一面}。
+使用后一种形式，\texttt{x}，\texttt{y} 和~\texttt{z} 之间的关系可以一览无余；
+而在前一种形式下，我们必须稍作思考才看得出来。
+
+如果这样简单的情形都能通过使用解构而变得更清晰，试想一下它在更复杂情况下会带来什么样的改观吧。
+\texttt{destrucuring-bind} 的第一个参数可以是任意复杂的一棵树。想象
+\begin{lstlisting}
+(destructuring-bind ((first last) (month day year) . notes)
+                    birthday
+  ...)
+\end{lstlisting}
+如果用~\texttt{let} 和列表访问函数来写将会是什么样子。这引出了另一个要点：
+解构使得程序更容易写也更容易读。
+
+解构在~\textsc{cltl}1 的~Common Lisp 里确实也有过。如果上例中的模式看起来眼熟
+的话，那是因为它们和宏的参数列表具有相同的形式。事实上，\texttt{destructuring}
+\emph{就是} 就是用来处理宏参数列表的代码，只不过现在拿出来单卖了。任何可以放进
+宏参数列表里的东西，你都可以把它置于这个匹配模式中，不过有个无关紧要的例外~(那个~\texttt{\&environment}
+关键字)。 
+
+建立各种绑定\emph{总的来说}是一个很有吸引力的想法。接下来的几个小节会介绍这个主题的几个变化。
+
+\section{其他结构}
+\label{sec:other_structures}
+
+没有理由把解构仅限于列表。解构同样适用于各种复杂对象。本节展示如何编写用于其他类型对象的
+类似~\texttt{destructuring-bind} 的宏。
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro dbind (pat seq &body body)
+  (let ((gseq (gensym)))
+    `(let ((,gseq ,seq))
+       ,(dbind-ex (destruc pat gseq #'atom) body))))
+
+(defun destruc (pat seq &optional (atom? #'atom) (n 0))
+  (if (null pat)
+      nil
+      (let ((rest (cond ((funcall atom? pat) pat)
+                        ((eq (car pat) '&rest) (cadr pat))
+                        ((eq (car pat) '&body) (cadr pat))
+                        (t nil))))
+        (if rest
+            `((,rest (subseq ,seq ,n)))
+            (let ((p (car pat))
+                  (rec (destruc (cdr pat) seq atom? (1+ n))))
+              (if (funcall atom? p)
+                  (cons `(,p (elt ,seq ,n))
+                        rec)
+                  (let ((var (gensym)))
+                    (cons (cons `(,var (elt ,seq ,n))
+                                (destruc p var atom?))
+                          rec))))))))
+
+(defun dbind-ex (binds body)
+  (if (null binds)
+      `(progn ,@body)
+      `(let ,(mapcar #'(lambda (b)
+                         (if (consp (car b))
+                             (car b)
+                             b))
+                     binds)
+         ,(dbind-ex (mapcan #'(lambda (b)
+                                (if (consp (car b))
+                                    (cdr b)))
+                            binds)
+                    body))))
+\end{lstlisting}
+  \caption{通用序列解构操作符}
+  \label{fig:general_sequence_destructuring_operator}
+  \index{dbind@\texttt{dbind}}
+  \index{destruc@\texttt{destruc}}
+\end{figure}
+
+下一步，自然是去处理一般性的序列\index{destructuring!on sequences}。
+图~\ref{fig:general_sequence_destructuring_operator} 中定义了一个名为~\texttt{dbind}
+的宏，它和~\texttt{destrucuring-bind} 类似，不过可以用在任何种类的序列上。第二个参数可以是
+列表，向量\index{vectors 向量!matching}或者它们的任意组合：
+\begin{lstlisting}
+> (dbind (a b c) #(1 2 3)
+    (list a b c))
+(1 2 3)
+> (dbind (a (b c) d) '(1 #(2 3) 4)
+    (list a b c d))
+(1 2 3 4)
+> (dbind (a (b . c) &rest d) '(1 "fribble" 2 3 4)
+    (list a b c d))
+(1 #\f "ribble" (2 3 4))
+\end{lstlisting}
+\verb|#(|\index{\#(@\texttt{\#(}} 读取宏用于表示向量，而~\verb|#\|\index{\#\textbacksplash\@\texttt{\#\textbackslash}} 则用于表示字符。由于
+~\verb|"abc" = #(#\a #\b #\c)|，所以
+~\texttt{"fribble"} 的第一个元素是字符~\verb|#f|\index{strings 字符串!as vectors}。为了简单起见，
+\texttt{dbind} 只支持~\verb|&rest| 和~\verb|&body| 关键字。
+
+和迄今为止见过的大多数宏相比，\texttt{dbind} 俨然是个庞然大物。这个宏的实现之所以值得好好研究一番，原因不仅仅是为了
+理解它的工作方式，更是为了它能给我们上一课，课的内容对于~Lisp 编程是通用的。
+正如第~\ref{sec:interactive_programming} 节提到的，我们在编写~Lisp 程序时，可以有意识地让它们更易于测试。\index{macros 宏!clarity 清晰}
+在多数代码里，我们必须要权衡这一诉求和代码速度上的需求。
+幸运的是，如第~\ref{sec:macro_style} 节所述，速度对于展开器代码来说不是那么要紧。
+当编写用来生成宏展开式的代码时，我们可以让自己放轻松一些。\texttt{dbind} 的展开式由两个
+函数生成，\texttt{destruc} 和~\texttt{dbind-ex}。也许它们两个可以被合并成一个函数，
+一步到位。但是何苦呢？作为两个独立的函数，它们将更容易测试。为什么要牺牲这个优势，
+换来我们并不需要的速度呢？
+
+第一个函数是~\texttt{destruc}，它遍历匹配模式，将每个变量和运行期对应对象的位置关联在一起：
+\begin{lstlisting}
+> (destruc '(a b c) 'seq #'atom)
+((A (ELT SEQ 0)) (B (ELT SEQ 1)) (C (ELT SEQ 2)))
+\end{lstlisting}
+可选的第三个参数是个谓词，它用来把模式的结构和模式的内容区分开。
+
+为了使访问更有效率，一个新的变量~(生成符号) 将被绑定到每个子序列上：
+\begin{lstlisting}
+> (destruc '(a (b . c) &rest d) 'seq)
+((A (ELT SEQ 0))
+ ((#:G2 (ELT SEQ 1)) (B (ELT #:G2 0)) (C (SUBSEQ #:G2 1)))
+ (D (SUBSEQ SEQ 2)))
+\end{lstlisting}
+
+\texttt{destruc} 的输出被发送给~\texttt{dbind-ex}，后者被用来生成宏展开
+代码。它将~\texttt{destruc} 产生的树转化成一系列嵌套的~\texttt{let}：
+\begin{lstlisting}
+> (dbind-ex (destruc '(a (b . c) &rest d) 'seq) '(body))
+(LET ((A (ELT SEQ 0))
+      (#:G4 (ELT SEQ 1))
+      (D (SUBSEQ SEQ 2)))
+  (LET ((B (ELT #:G4 0))
+        (C (SUBSEQ #:G4 1)))
+    (PROGN BODY)))
+\end{lstlisting}
+
+注意到~\texttt{dbind}，和~\texttt{destructuring-bind} 一样，假设它将发现所有它寻找
+的列表结构。最后剩下的变量并不是简单地绑定到~\texttt{nil}\index{multiple-value-bind@\texttt{multiple-value-bind}!leftover parameters \texttt{nil}}，
+就像~\texttt{multiple-value-bind} 那样。如果运行期给出的序列里没有包含所有期待的元素，
+解构操作符将产生一个错误：
+\begin{lstlisting}
+> (dbind (a b c) (list 1 2))
+>>Error: 2 is not a valid index for the sequence (1 2)
+\end{lstlisting}
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro with-matrix (pats ar &body body)
+  (let ((gar (gensym)))
+    `(let ((,gar ,ar))
+       (let ,(let ((row -1))
+               (mapcan
+                 #'(lambda (pat)
+                     (incf row)
+                     (let ((col -1))
+                       (mapcar #'(lambda (p)
+                                   `(,p (aref ,gar
+                                              ,row
+                                              ,(incf col))))
+                               pat)))
+                 pats))
+         ,@body))))
+
+(defmacro with-array (pat ar &body body)
+  (let ((gar (gensym)))
+    `(let ((,gar ,ar))
+       (let ,(mapcar #'(lambda (p)
+                         `(,(car p) (aref ,gar ,@(cdr p))))
+                     pat)
+         ,@body))))
+\end{lstlisting}
+  \caption{数组上的解构}
+  \label{fig:destructuring_on_arrays}
+  \index{with-matrix@\texttt{with-matrix}}
+  \index{with-array@\texttt{with-array}}
+\end{figure}
+
+其他有内部结构的对象该怎么处理呢？通常还有数组，它和向量的区别在于其维数可以大于一。
+如果我们为数组定义解构宏\index{destructuring!on arrays}，我们怎样表达匹配模式呢？对于两维数组，用列表还是比较实际的。
+图~\ref{fig:destructuring_on_arrays}\footnote{译者注：这里稍微修改了一下原书的代码，
+  原书中没有定义~\texttt{col} 变量就直接使用了~\texttt{(setq col -1)}，
+  这里仿照~\texttt{row} 的处理方法用~\texttt{let} 建立了一个~\texttt{col}
+  的局部绑定。} 含有一个宏，\texttt{with-matrix}，用于解构两维数组。
+\begin{lstlisting}
+> (setq ar (make-array '(3 3)))
+#<Simple-Array T (3 3) C2D39E>
+> (for (r 0 2)
+    (for (c 0 2)
+      (setf (aref ar r c) (+ (* r 10) c))))
+NIL
+> (with-matrix ((a b c)
+                (d e f)
+                (g h i)) ar
+    (list a b c d e f g h i))
+(0 1 2 10 11 12 20 21 22)
+\end{lstlisting}
+
+对于大型数组，或者维数是~3 或更高的数组来说，我们就需要另辟奚径。我们不大可能把
+一个大数组里的每一个元素都绑定到变量上。将匹配模式做成数组的稀疏表达将会更实际一些\pozhehao{}只包含用于少数
+元素的变量，加上用来标识它们的坐标。图~\ref{fig:destructuring_on_arrays} 中的第二个
+宏就采用了这个思路。这里我们用它来得到前一个数组在对角线上的元素：
+\begin{lstlisting}
+> (with-array ((a 0 0) (d 1 1) (i 2 2)) ar
+    (values a d i))
+0
+11
+22
+\end{lstlisting}
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro with-struct ((name . fields) struct &body body)
+  (let ((gs (gensym)))
+    `(let ((,gs ,struct))
+       (let ,(mapcar #'(lambda (f)
+                         `(,f (,(symb name f) ,gs)))
+                     fields)
+         ,@body))))
+\end{lstlisting}
+  \caption{结构体上的解构}
+  \label{fig:destructuring_on_structures}
+  \index{with-struct@\texttt{with-struct}}
+\end{figure}
+
+通过这个新宏，我们开始逐渐跳出那些认为元素必须以固定顺序出现的思维模式。我们可以做出一个类似形式的宏，
+用它来绑定变量到~\texttt{defstruct} 所建立的结构体\index{destructuring!on structures}字段上。图
+~\ref{fig:destructuring_on_structures} 中就这样定义一个宏。模式中的第一个参数被接受为与结构体相关联的
+前缀，其余的都是字段名。为了建立访问调用，这个宏使用了~\texttt{symb}
+(第~\pageref{fig:functions_which_operate_on_symbols_and_strings} 页)。
+\begin{lstlisting}
+> (defstruct visitor name title firm)
+VISITOR
+> (setq theo (make-visitor :name "Theodebert"
+                           :title 'king
+                           :firm 'franks))
+#S(VISITOR NAME "Theodebert" TITLE KING FIRM FRANKS)
+> (with-struct (visitor- name firm title) theo
+    (list name firm title))
+("Theodebert" FRANKS KING)
+\end{lstlisting}
+\index{Theodebert}
+
+\section{引用}
+\label{sec:destructuring:reference}
+\index{destructuring!and reference}
+
+\textsc{Clos} 自带了一个用于解构实例\index{destructuring!on instances}的宏。假设~\texttt{tree} 是一个带有三个~slot
+的类：\texttt{species}、\texttt{age} 和~\texttt{height}，而~\texttt{my-tree}
+是一个~\texttt{tree} 的实例。在
+\begin{lstlisting}
+(with-slots (species age height) my-tree
+  ...)
+\end{lstlisting}
+的里面我们可以像常规变量那样引用~\texttt{my-tree} 的这些~slot。在~\texttt{with-slots}\index{with-slots@\texttt{with-slots}}\index{Common Lisp!differences between versions!with-slots@\texttt{with-slots}}
+的主体中，符号~\texttt{height} 指向~\texttt{height} slot。\texttt{height} 并不是简单地绑定到了对应~slot 里的变量，而是直接\emph{引用}到那个~slot 上。所以，如果我们写：
+\begin{lstlisting}
+(setq height 72)
+\end{lstlisting}
+那么也将给~\texttt{my-tree} 的~\texttt{height} 这个~slot 一个~72 的值。
+这个宏的工作原理是
+将~\texttt{height} 定义为一个展开到~slot 引用的符号宏~(第~\ref{sec:symbol_macros}
+节)\index{symbol-macros}。
+事实上，\texttt{symbol-macrolet} 就是为了支持像~\texttt{with-slots} 这样的宏才被
+加入到~Common Lisp 中的。
+
+无论~\texttt{with-slots} 事实上是不是一个解构宏，它在实际编程中所起的作用和~\texttt{destructuring-bind} 是一样的。
+虽然通常的解构都是按值调用~(call-by-value)，这种新型解构却是按名调用~(call-by-name)。
+无论我们如何调用它，它对我们都是有用的。还有其他什么宏，我们可以依法炮制呢？
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro with-places (pat seq &body body)
+  (let ((gseq (gensym)))
+    `(let ((,gseq ,seq))
+       ,(wplac-ex (destruc pat gseq #'atom) body))))
+
+(defun wplac-ex (binds body)
+  (if (null binds)
+      `(progn ,@body)
+      `(symbol-macrolet ,(mapcar #'(lambda (b)
+                                     (if (consp (car b))
+                                         (car b)
+                                         b))
+                                 binds)
+         ,(wplac-ex (mapcan #'(lambda (b)
+                                (if (consp (car b))
+                                    (cdr b)))
+                            binds)
+                    body))))
+\end{lstlisting}
+  \caption{序列上的引用解构}
+  \label{fig:reference_destructuring_on_sequences}
+  \index{with-places@\texttt{with-places}}
+\end{figure}
+
+我们可以这样做：将解构宏展开成~\texttt{symbol-macrolet} 而不是~\texttt{let}，这样，
+就可以为任何解构宏创建出与之对应的按名调用版本。图~\ref{fig:reference_destructuring_on_sequences} 给出了
+一个被修改成与~\texttt{with-slots} 行为类似的~\texttt{dbind} 版本。我们可以像使用
+~\texttt{dbind} 一样来使用~\texttt{with-places}：
+\begin{lstlisting}
+> (with-places (a b c) #(1 2 3)
+    (list a b c))
+(1 2 3)
+\end{lstlisting}
+但这个新宏还给我们~\texttt{setf} 序列位置的选项，就像我们在~\texttt{with-slots} 里
+所做的那样：
+\begin{lstlisting}
+> (let ((lst '(1 (2 3) 4)))
+    (with-places (a (b . c) d) lst
+      (setf a 'uno)
+      (setf c '(tre)))
+    lst)
+(UNO (2 TRE) 4)
+\end{lstlisting}
+就像在~\texttt{with-slots} 里那样，这些变量现在都指向了序列中的对应位置。尽管如此，
+这里还有一个重要的区别：你必须使用~\texttt{setf} 而不是~\texttt{setq} 来设置这些
+伪变量。\texttt{with-slots} 宏必须引入一个~code-walker\index{code-walkers}
+(第~\pageref{expl:code-walker}
+页) 来将其体内的~\texttt{setq} 转化成~\texttt{setf}。这里，写一个~code-walker 将需要
+写很多代码，但是带来的好处却不大。
+
+如果~\texttt{with-places} 比~\texttt{dbind} 更通用，为什么不干脆只用它呢？
+\texttt{dbind} 将一个变量关联一个值上，而~\texttt{with-places} 却是将变量关联到一组
+用来找到一个值的指令集合上。每一个引用都需要进行一次查询。当~\texttt{dbind} 把
+~\texttt{c} 绑定到~\texttt{(elt x 2)} 的值上时，\texttt{with-places} 将使
+~\texttt{c} 成为一个展开成~\texttt{(elt x 2)} 的符号宏\index{symbol-macros}。所以如果~\texttt{c} 在宏体
+中被求值了~$n$ 次，那将会产生~$n$ 次对~\texttt{elt} 的调用。除非你真的想要
+~\texttt{setf} 那些由解构创建的变量，否则~\texttt{dbind} 将会更快一些。
+
+\texttt{with-places} 的定义和~\texttt{dbind}
+(图~\ref{fig:general_sequence_destructuring_operator}) 相比仅有轻微的变化。
+在~\texttt{wplac-ex} (之前的~\texttt{dbind-ex}) 中那些~\texttt{let} 变成了
+~\texttt{symbol-macrolet}。通过类似的改动，我们也可以为任何正常的解构宏做出一个按名调用
+的版本。
+
+\section{匹配}
+\label{sec:destructuring:matching}
+
+正如解构是赋值的泛化，\emph{模式匹配}是解构的泛化。“模式匹配”\index{pattern-matching}这个术语有许多含义。
+在这里的语境中，它指的是这样的操作：比较两个结构，结构中可能含有变量，判断是否存在某种给变量赋值的
+方式使得它们俩相等。例如，如果~\texttt{?x} 和~\texttt{?y} 是变量，那么这两个列表
+\begin{lstlisting}
+(p ?x ?y c ?x)
+(p  a  b c  a)
+\end{lstlisting}
+当~\texttt{?x = a} 并且~\texttt{?y = b} 时匹配。而列表
+\begin{lstlisting}
+(p ?x b ?y a)
+(p ?y b  c a)
+\end{lstlisting}
+当~\texttt{?x = ?y = c} 时匹配。
+
+假设一个程序通过跟外部数据源交换信息的方式工作。为了回复一个消息，程序必须首先知道消息的类型
+，并且还要取出它的特定内容。通过一个匹配操作符我们可以将这两步并成一步。
+
+% xxx
+要写出这种操作符，必须先想出一种区分变量的办法。我们不能直接把所有符号都当成
+变量，因为需要让符号在模式中以参数的形式出现。这里我们规定：模式变量\index{pattern variables}是以问号开始的符号。
+如果将来觉得不方便了，只要重定义谓词~\texttt{var?} 就可以改变这个约定。
+
+\begin{figure}
+\begin{lstlisting}
+(defun match (x y &optional binds)
+  (acond2
+    ((or (eql x y) (eql x '_) (eql y '_)) (values binds t))
+    ((binding x binds) (match it y binds))
+    ((binding y binds) (match x it binds))
+    ((varsym? x) (values (cons (cons x y) binds) t))
+    ((varsym? y) (values (cons (cons y x) binds) t))
+    ((and (consp x) (consp y) (match (car x) (car y) binds))
+     (match (cdr x) (cdr y) it))
+    (t (values nil nil))))
+
+(defun varsym? (x)
+  (and (symbolp x) (eq (char (symbol-name x) 0) #\?)))
+
+(defun binding (x binds)
+  (labels ((recbind (x binds)
+             (aif (assoc x binds)
+                  (or (recbind (cdr it) binds)
+                      it))))
+    (let ((b (recbind x binds)))
+      (values (cdr b) b))))
+\end{lstlisting}
+  \caption{匹配函数}
+  \label{fig:matching_function}
+  \index{match@\texttt{match}}
+  \index{varsym?@\texttt{varsym?}}
+  \index{binding@\texttt{binding}}
+\end{figure}
+
+图~\ref{fig:matching_function} 包含一个模式匹配的函数，它跟一些~Lisp 入门读物里的匹配函数样子
+差不多\note{238}。我们传给~\texttt{match} 两个列表，如果它们可以匹配，将得到另一个列表，该列表
+会显示它们是如何匹配的：
+\begin{lstlisting}
+> (match '(p a b c a) '(p ?x ?y c ?x))
+((?Y . B) (?X . A))
+T
+> (match '(p ?x b ?y a) '(p ?y b c a))
+((?Y . C) (?X . ?Y))
+T
+> (match '(a b c) '(a a a))
+NIL
+NIL
+\end{lstlisting}
+
+% xxx
+在~\texttt{match} 逐个元素地比较它的参数时，它建立起来了一系列值和变量
+之间的赋值关系\index{binding list 绑定列表}，这种关系被称为\emph{绑定}。这些变量是由参数~\texttt{binds} 给出的。
+若匹配成功，\texttt{match} 返回其生成的绑定，
+否则返回~\texttt{nil}。由于并非所有成功的匹配都能生成绑
+定，所以和~\texttt{gethash} 一样，\texttt{match}用第二个返回值来表示
+匹配成功与否：
+\begin{lstlisting}
+> (match '(p ?x) '(p ?x))
+NIL
+T
+\end{lstlisting}
+当~\texttt{match} 像上面那样返回~\texttt{nil} 和~\texttt{t} 时，它表示一个没有产生
+任何绑定的成功的匹配。
+
+和~Prolog 一样，\texttt{match} 也把~\texttt{\_} (下划线)\index{\_@\texttt{\_}} 用作通配符。它可以匹配任何
+东西，并且对绑定没有任何影响：
+\begin{lstlisting}
+> (match '(a ?x b) '(_ 1 _))
+((?X . 1))
+T
+\end{lstlisting}
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro if-match (pat seq then &optional else)
+  `(aif2 (match ',pat ,seq)
+         (let ,(mapcar #'(lambda (v)
+                           `(,v (binding ',v it)))
+                       (vars-in then #'atom))
+           ,then)
+         ,else))
+
+(defun vars-in (expr &optional (atom? #'atom))
+  (if (funcall atom? expr)
+      (if (var? expr) (list expr))
+      (union (vars-in (car expr) atom?)
+             (vars-in (cdr expr) atom?))))
+
+(defun var? (x)
+  (and (symbolp x) (eq (char (symbol-name x) 0) #\?)))
+\end{lstlisting}
+  \caption{慢的匹配操作符}
+  \label{fig:slow_matching_operator}
+  \index{if-match@\texttt{if-match}}
+  \index{var@\texttt{var?}}
+\end{figure}
+
+有了~\texttt{match}，可以很容易地写出一个模式匹配版本的~\texttt{dbind}。
+图~\ref{fig:slow_matching_operator} 中含有一个称为~\texttt{if-match} 的宏。
+像~\texttt{dbind} 那样，它的前两个参数是一个模式和一个序列，然后它通过比较模式跟序列来
+建立绑定。不过，它用另外两个参数取代了代码主体：一个~\texttt{then} 子句，在
+新绑定下被求值，如果匹配成功的话；以及一个~\texttt{else} 子句在匹配失败时被求值。这里
+有一个简单的使用~\texttt{if-match} 的函数：
+\begin{lstlisting}
+(defun abab (seq)
+  (if-match (?x ?y ?x ?y) seq
+    (values ?x ?y)
+    nil))
+\end{lstlisting}
+如果匹配成功了，它将建立~\texttt{?x} 和~\texttt{?y} 的值，然后返回它们：
+\begin{lstlisting}
+> (abab '(hi ho hi ho)
+HI
+HO
+\end{lstlisting}
+
+函数~\texttt{vars-in} 返回一个表达式中的所有匹配变量。它调用~\texttt{var?} 来测试是否
+某个东西是一个变量。目前，\texttt{var?} 和用来检测绑定列表中变量的~\texttt{varsym?}
+(图~\ref{fig:matching_function}) 是相同的，之所以使用独立的两个函数是考虑到我们可能想要
+给这两类变量采用不同的表示方法。
+
+像在图~\ref{fig:slow_matching_operator} 里定义的那样，\texttt{if-match} 很短，
+但并不是非常高效。它在运行期做的事情太多了。我们在运行期把两个序列都遍历了，尽管第一个
+序列在编译期就是已知的。更糟糕的是，在进行匹配的过程中，我们构造列表来存放变量绑定。如果
+充分利用编译期已知的信息，就能写出一个既不做任何不必要的比较，也不做任何~cons 的
+~\texttt{if-match} 版本来。
+
+如果其中一个序列在编译期已知，并且只有这个序列里含有变量，那么就要另做打算了。在一次
+对~\texttt{match} 的调用中，两个参数都可能含有变量。通过将变量限制在~\texttt{if-match} 的
+第一个参数上，就有可能在编译期知道哪些变量将会参与匹配。这里，我们不再创建变量绑定的列表，
+而是将变量的值保存进这些变量本身。
+
+\begin{figure}
+\begin{lstlisting}
+(defmacro if-match (pat seq then &optional else)
+  `(let ,(mapcar #'(lambda (v) `(,v ',(gensym)))
+                 (vars-in pat #'simple?))
+     (pat-match ,pat ,seq ,then ,else)))
+
+(defmacro pat-match (pat seq then else)
+  (if (simple? pat)
+      (match1 `((,pat ,seq)) then else)
+      (with-gensyms (gseq gelse)
+        `(labels ((,gelse () ,else))
+           ,(gen-match (cons (list gseq seq)
+                             (destruc pat gseq #'simple?))
+                       then
+                       `(,gelse))))))
+
+(defun simple? (x) (or (atom x) (eq (car x) 'quote)))
+
+(defun gen-match (refs then else)
+  (if (null refs)
+      then
+      (let ((then (gen-match (cdr refs) then else)))
+        (if (simple? (caar refs))
+            (match1 refs then else)
+            (gen-match (car refs) then else)))))
+\end{lstlisting}
+  \caption{快速匹配操作符}
+  \label{fig:fast_matching_operator}
+  \label{macro:if-match}
+  \index{pat-match@\texttt{pat-match}}
+\end{figure}
+
+\begin{figure}
+\begin{lstlisting}
+(defun match1 (refs then else)
+  (dbind ((pat expr) . rest) refs
+    (cond ((gensym? pat)
+           `(let ((,pat ,expr))
+              (if (and (typep ,pat 'sequence)
+                       ,(length-test pat rest))
+                  ,then
+                  ,else)))
+          ((eq pat '_) then)
+          ((var? pat)
+           (let ((ge (gensym)))
+             `(let ((,ge ,expr))
+                (if (or (gensym? ,pat) (equal ,pat ,ge))
+                    (let ((,pat ,ge)) ,then)
+                         ,else))))
+          (t `(if (equal ,pat ,expr) ,then ,else)))))
+
+(defun gensym? (s)
+  (and (symbolp s) (not (symbol-package s))))
+
+(defun length-test (pat rest)
+  (let ((fin (caadar (last rest))))
+    (if (or (consp fin) (eq fin 'elt))
+        `(= (length ,pat) ,(length rest))
+        `(> (length ,pat) ,(- (length rest) 2)))))
+\end{lstlisting}
+  \caption{快速匹配操作符~(续)}
+  \label{fig:fast_matching_operator_continued}
+  \index{gensym?@\texttt{gensym?}}
+  \index{typep@\texttt{typep}}
+\end{figure}
+
+在图~\ref{fig:fast_matching_operator} 和~\ref{fig:fast_matching_operator_continued} 中
+是~\verb|if-match| 的新版本。如果能预见到哪部分代码会在运行期求值，
+我们不妨就直接在编译期生成它。这里，我们生成的代码仅仅完成需要的那些比较操作，
+而不是展开成对~\verb|match| 的调用。
+
+如果我们打算使用变量~\texttt{?x} 来包含~\texttt{?x} 的绑定的话，怎样表达一个尚未被
+匹配过程建立绑定的变量呢？这里，我们将通过将一个模式变量绑定到一个生成符号以表明其未绑定。
+所以~\texttt{if-match} 一开始会生成代码将所有模式中的变量绑定到生成符号上。在这种情况下，
+代替了展开成一个~\texttt{with-gensyms}，在编译期做一次符号生成，然后将它们直接插入进展开式
+是安全的。
+
+其余的展开由~\texttt{pat-match} 完成。这个宏接受和~\texttt{if-match} 相同的参数；唯一
+的区别是它不为模式变量建立任何新绑定。在某些情况下这是一个优点，
+第~\ref{chap:a_query_compiler} 章将把~\texttt{pat-match} 作为一个独立的操作符来
+使用。
+
+在新的匹配操作符里，模式内容和模式结构之间的差别将用函数~\texttt{simple?} 定义。如果
+我们想要在模式里使用字面引用，那么解构代码~(以及~\texttt{vars-in}) 必须被告知不要进入
+那些第一个元素是~\texttt{quote} 的列表。在新的匹配操作符下，我们将可以使用列表作为
+模式元素，只需简单地将它们引用起来。
+
+与~\texttt{dbind} 相似，\texttt{pat-match} 调用~\texttt{destruc} 来得到一个
+将要在运行期参与其参数调用的列表。这个列表被传给~\texttt{gen-match} 来为嵌套的模式递归
+生成匹配代码，然后再传给~\texttt{match1}，以生成模式树上每个叶子的匹配代码。
+
+最后出现在一个~\texttt{if-match} 展开式中的多数代码都来自~\texttt{match1}，如图
+~\ref{fig:fast_matching_operator_continued}。这个函数分四种情况处理。
+如果模式参数是一个生成符号，那么它是一个由~\texttt{destruc} 创建用于保存子列表的不可见
+变量，并且所有我们需要在运行期做的就是测试它是否具有正确的长度。如果模式元素是一个通配符
+~(\verb|_|)，那么不需要生成任何代码。如果模式元素是一个变量，那么~\texttt{match1}
+会生成代码去匹配，或者将其设置成，运行期给出的序列的对应部分。否则，模式元素被看作一个字面
+上的值，而~\texttt{match1} 会生成代码去比较它和序列中的对应部分。
+
+让我们通过例子来了解一下展开式中的某些部分的生成过程。假设我们从下面的表达式开始
+\begin{lstlisting}
+(if-match (?x 'a) seq
+  (print ?x)
+  nil)
+\end{lstlisting}
+这个模式将被传给~\texttt{destruc}，同时带着一些生成符号~(不妨简称为~\texttt{g})
+来代表那个序列：
+\begin{lstlisting}
+(destruc '(?x 'a) 'g #'simple?)
+\end{lstlisting}
+得到：
+\begin{lstlisting}
+((?x (elt g 0)) ((quote a) (elt g 1)))
+\end{lstlisting}
+在这个列表的开头我们接上~\texttt{(g seq)}：
+\begin{lstlisting}
+((g seq) (?x (elt g 0)) ((quote a) (elt g 1)))
+\end{lstlisting}
+然后把结果整个地发给~\texttt{gen-match}。就像~\texttt{length}
+(第~\pageref{func:our-length_native} 页) 的原生实现那样，\texttt{gen-match} 首先
+一路递归到列表的结尾，然后在回来的路上构造其返回值。当~\texttt{gen-match} 走完所有元素
+时，它就返回其~\texttt{then} 参数，也就是~\texttt{(print ?x)}\footnote{译者注：
+原文中说返回的~\texttt{then} 参数是~\texttt{?x}，这应该是个笔误。}。
+在递归回来的路上，这个返回值将作为~\texttt{then} 参数传给~\texttt{match1}。现在我们
+将得到一个像这样的调用：
+\begin{lstlisting}
+(match1 '(((quote a) (elt g 1))) '(print ?x) '$\langle{}else function\rangle$)
+\end{lstlisting}
+得到：
+\begin{lstlisting}
+(if (equal (quote a) (elt g 1))
+    (print ?x)
+    $\langle{}else function\rangle$)
+\end{lstlisting}
+然后这些将成为另一个~\texttt{match1} 调用的~\texttt{then} 参数，得到的值将成为最后
+的~\texttt{match1} 调用的~\texttt{then} 参数。这个~\texttt{if-match} 的完整展开式
+显示在图~\ref{fig:expansion_of_an_if-match}
+\footnote{译者注：原书里有一个笔误，展开式代码中的~\texttt{(gensym? x)}
+  应为~\texttt{(gensym? ?x)}。} 中。
+
+\begin{figure}
+\begin{lstlisting}
+(if-match (?x 'a) seq
+  (print ?x))
+\end{lstlisting}
+展开成：
+\begin{lstlisting}
+(let ((?x '#:g1))
+  (labels ((#:g3 nil nil))
+    (let ((#:g2 seq))
+      (if (and (typep #:g2 'sequence)
+               (= (length #:g2) 2))
+          (let ((#:g5 (elt #:g2 0)))
+            (if (or (gensym? ?x) (equal ?x #:g5))
+                (let ((?x #:g5))
+                  (if (equal 'a (elt #:g2 1))
+                      (print ?x)
+                      (#:g3)))
+                (#:g3)))
+          (#:g3)))))
+\end{lstlisting}
+  \caption{一个~\texttt{if-match} 的展开式}
+  \label{fig:expansion_of_an_if-match}
+\end{figure}
+
+在这个展开式里有两个地方用到了~gensym\index{gensym@\texttt{gensym}!as unbound} (生成符号)，这两个地方的用意各不相同。在运行时，一些变量被用来保存树的一部分，
+这些变量的名字是用~gensym 生成的，目的是为了避免捕捉。而变量~\texttt{?x} 在开始的时候被绑定到了
+一个~gensym，以表明它尚未被匹配操作赋给一个值。\note{244-1}
+
+在新的~\texttt{if-match} 中，模式元素现在是被求值而不再是被隐式引用了。\note{244-2}这意味着~Lisp
+变量可以被用于模式中，和被引用的表达式一样：
+\begin{lstlisting}
+> (let ((n 3))
+    (if-match (?x n 'n '(a b)) '(1 3 n (a b))
+      ?x))
+1
+\end{lstlisting}
+还有两个进一步的改进，是因为新版本调用了~\texttt{destruc}
+(图~\ref{fig:general_sequence_destructuring_operator}) 而出现。现在模式中可以包含
+~\texttt{\&rest} 或者~\texttt{\&body} 关键字~(\texttt{match} 是不管这一套的)。
+并且因为~\texttt{destruc} 使用了一般的序列操作符\index{sequence operators}~\texttt{elt}\index{elt@\texttt{elt}} 和~\texttt{subseq}\index{subseq@\texttt{subseq}}，
+新的~\texttt{if-match} 将工作在任何类型的序列上。如果~\texttt{abab} 采用新版本来定义，
+它也可以被用于向量\index{vectors 向量!matching}和字符串\index{strings 字符串!matching}：
+\begin{lstlisting}
+> (abab "abab")
+#\a
+#\b
+> (abab #(1 2 1 2))
+1
+2
+\end{lstlisting}
+事实上，模式可以像~\texttt{dbind} 的模式那样复杂：
+\begin{lstlisting}
+> (if-match (?x (1 . ?y) . ?x) '((a b) #(1 2 3) a b)
+    (values ?x ?y))
+(A B)
+#(2 3)
+\end{lstlisting}
+注意到，在第二个返回值里，向量的元素被显示出来了。要想使向量以这种方式被输出，需要将
+~\texttt{*print-array*}\index{print-array@\texttt{*print-array*}} 设置为~\texttt{t}。
+
+在本章，我们开始逐步走进一个崭新的编程领域。以一个简单的用于解构的宏作开端。
+在~\texttt{if-match} 的最终版本中，我们有了某种看起来更像是它自己的语言的东西。
+接下来的章节将要介绍一整类程序，它们秉承的都是相同的理念。
+
+%%% Local Variables:
+%%% coding: utf-8
+%%% mode: latex
+%%% TeX-master: "onlisp-cn"
+%%% End:

@@ -1,0 +1,250 @@
+%!TEX encoding = UTF-8 Unicode
+% $Id: 6-functions_as_representation.tex 17 2014-03-09 13:05:41Z binghe $
+
+\chapter{函数作为表达方式}
+\label{chap:functions_as_representation}
+
+通常说来，数据结构被用来\emph{描述事物}。可以用数组描述坐标变换，用树结
+构表示命令的层次结构，而用图来表示铁路网。
+在~Lisp 里，我们常会使用闭包\index{functions 函数!closures of}\index{functions 函数!as return values}\index{closures 闭包}作为表现形式。在闭包里，变量绑定可以
+保存信息，也能扮演在复杂数据结构中指针\index{pointers 指针}的角色。
+如果让一组闭包之间
+共享绑定，或者让它们之间能相互引用\index{chains of closures}，那么我们就可以创建混合型的对象类型，它同
+时继承了数据结构和程序逻辑两者的优点。
+
+其实在表象之下，共享绑定\emph{就是}指针。闭包只是让我们能在更高的抽象
+层面上操作指针。通过用闭包来表示我们以往用静态数据结构表示的对
+象，就往往可能得到更为优雅，效率更好的程序。
+
+\section{网络}
+\label{sec:networks}
+
+闭包有三个有用的特性：它是动态的，拥有局部状态，而且我们可以创建
+闭包的多个实例。那么带有局部状态的动态对象的多个拷贝能在什么地方一展身
+手呢？答案是：和网络有关的程序。许多情况下，我们可以把网络中的节点表示
+成闭包。闭包在拥有其局部状态的同时，它还能引用其它闭包。因而，一个表示
+网络中节点的闭包是能够知道作为它发送数据目的地的其他几个节点~(闭包) 的。
+换句话说，我们有能力把网络结构直接翻译成代码。
+
+在本节和下一节里，我们会分别了解两种遍历网络的方法。首先我们会按照传统
+的办法，即把节点定义成结构体\index{networks!representing}，并用与之分离
+的代码来遍历网络。接着，在下一节我们将会用一个统一的抽象模型来构造通用
+功能的程序。
+
+\begin{figure}
+\begin{lstlisting}
+> (run-node 'people)
+Is the person a man?
+>> yes
+Is he living?
+>> no
+Was he American?
+>> yes
+Is he on a coin?
+>> yes
+Is the coin a penny?
+>> yes
+LINCOLN
+\end{lstlisting}
+\caption{\label{fig:session_of_20_questions}一轮~twenty questions 游戏}
+\end{figure}
+
+我们将选择一个最简单的应用作为例子：一个能运行~twenty questions\index{twenty questions}
+\footnote{译者注：twenty questions 曾是一档国外很流行的电视智力节目，同
+  时也是人工智能的重要题材。} 的程序。我们的网络将会是一棵二叉树。
+每个非叶子节点都会含有一个是非题，并且根据对这个问题的回答，遍历过程
+会在左子树或者右子树两者中择一，继续往下进行。叶子节点将会含有所有的返
+回值。当遍历过程遇到叶子节点时，叶子节点的值会被作为遍历过程的返回值返
+回。如图~\ref{fig:session_of_20_questions} 所示，是程序运行一轮~twenty
+questions 的样子。
+
+\begin{figure}
+\begin{lstlisting}
+(defstruct node  contents yes no)
+
+(defvar *nodes* (make-hash-table))
+
+(defun defnode (name conts &optional yes no)
+  (setf (gethash name *nodes*)
+        (make-node :contents conts
+                   :yes      yes
+                   :no       no)))
+\end{lstlisting}
+\caption{\label{fig:representation_and_definition_of_nodes}节点的表示方法及其定义
+}
+\end{figure}
+
+从习惯的办法着手，可能就是先定义某种数据结构来表示节点。节点应该包含这
+几样信息：它是否是叶子节点；如果是的话，那返回值是什么，倘若不是，要问
+什么问题；还有与答案对应的下个节点是什么样的。
+图~\ref{fig:representation_and_definition_of_nodes} 里定义了一个信息足
+够详尽的数据结构。它的设计目标是让数据所占的空间最小化。\texttt{contents} 字
+段中要么是问题要么是返回值。如果该节点不是叶子节点，那么~\texttt{yes}
+和~\texttt{no} 字段会告诉我们与问题的答案对应的去向；如果节点是个叶子节
+点，我们自然会知道这一点，因为这些字段会是空的。全局
+的~\texttt{*nodes*} 是一个哈希表，在表中，我们会用节点的名字来索引节点。
+最后，\texttt{defnode} 会新建一个节点~(两种节点都可以)，并把它保存
+到~\texttt{*nodes*} 中。有了这些原材料，我们就可以定义树的第一个节点了：
+\begin{lstlisting}
+(defnode 'people "Is the person a man?"
+         'male 'female)
+\end{lstlisting}
+图~\ref{fig:sample_network} 中所示的网络正好足够我们运
+行~\ref{fig:session_of_20_questions} 中所示的一轮游戏。
+
+\begin{figure}
+\begin{lstlisting}
+(defnode 'people "Is the person a man?" 'male 'female)
+
+(defnode 'male "Is he living?" 'liveman 'deadman)
+
+(defnode 'deadman "Was he American?" 'us 'them)
+
+(defnode 'us "Is he on a coin?" 'coin 'cidence)
+
+(defnode 'coin "Is the coin a penny?" 'penny 'coins)
+
+(defnode 'penny 'lincoln)
+\end{lstlisting}
+\caption{\label{fig:sample_network}作为样例的网络}
+\end{figure}
+
+\begin{figure}
+\begin{lstlisting}
+(defun run-node (name)
+  (let ((n (gethash name *nodes*)))
+    (cond ((node-yes n)
+           (format t "~A~%>> " (node-contents n))
+           (case (read)
+             (yes (run-node (node-yes n)))
+             (t   (run-node (node-no n)))))
+          (t (node-contents n)))))
+\end{lstlisting}
+  \caption{\label{fig:function_for_traversing_networks}用来遍历网络的函数}
+\end{figure}
+
+现在，我们要做的就是写一个能遍历这个网络的函数了，这个函数应该打印出问
+题，并顺着答案所指示的路径走下去。函数的名字是~\texttt{run-node}，如
+图~\ref{fig:function_for_traversing_networks} 所示。给出一个名字，
+我们就根据名字找到对应的节点。如果该节点不是叶子节点，
+就把~\texttt{contents} 作为问题打印出来，按照答案不同，我们继续顺着
+两条可能的途径之一继续遍历。如果该节点是叶子节点，\texttt{run-node} 
+会径直返回~\texttt{contents}。使用图~\ref{fig:sample_network} 中
+定义的网络，这个函数就能生成图~\ref{fig:session_of_20_questions} 
+中的输出信息。
+
+
+\section{编译后的网络}
+\label{sec:compiling_networks}
+\index{compilation 编译!of networks 网络}
+
+在上一节，我们编写了一个使用网络的程序，也许使用任何一种语言都能写出
+这样的程序。的确，这个程序太简单了，看上去似乎很难把它写成另一个模样。
+但是事实上，我们可以把程序打理得更简洁一些。
+
+\begin{figure}
+\begin{lstlisting}
+(defvar *nodes* (make-hash-table))
+
+(defun defnode (name conts &optional yes no)
+  (setf (gethash name *nodes*)
+        (if yes
+            #'(lambda ()
+                (format t "~A~%>> " conts)
+                (case (read)
+                  (yes (funcall (gethash yes *nodes*)))
+                  (t   (funcall (gethash no  *nodes*)))))
+            #'(lambda () conts))))
+\end{lstlisting}
+  \caption{\label{fig:a_netwok_compiled_into_closures}编译成闭包形式的网络}
+\end{figure}
+
+图~\ref{fig:a_netwok_compiled_into_closures} 就是明证。这是让我们的网
+络运行起来所需要的所有代码。在这里，不再把节点定义成一个结构，也没有用
+一个单独的函数来遍历这些节点，而是把节点表示成闭包\index{networks!representing}。原来保存在数据结构里的数据现在栖身于闭包里的变量绑定中。没有必要运
+行~\texttt{run-node} 了，它已经隐含在了节点自身里面。要启动遍历过程，
+只消~funcall 一下起始的那个节点就行了：
+\begin{lstlisting}
+(funcall (gethash 'people *nodes*))
+Is the person a man
+>>
+\end{lstlisting}
+自此，接下来的人机对话就和上个版本的实现一样了。
+
+借助把节点都表示成闭包的方式，我们得以将~twenty questions 网络完全转化
+成代码~(而非数据)。正如我们所看到的，程序代码必须在运行时按照名字来查找
+节点函数。然而，如果我们确信网络在运行的时候不会重新定义，那就可以
+更进一步：让节点函数直接调用它们的下一站目标函数，而不必再动用
+哈希表了。
+
+\begin{figure}
+\begin{lstlisting}
+(defvar *nodes* nil)
+
+(defun defnode (&rest args)
+  (push args *nodes*)
+  args)
+
+(defun compile-net (root)
+  (let ((node (assoc root *nodes*)))
+    (if (null node)
+        nil
+      (let ((conts (second node))
+            (yes (third node))
+            (no (fourth node)))
+        (if yes
+            (let ((yes-fn (compile-net yes))
+                  (no-fn  (compile-net no)))
+              #'(lambda ()
+                  (format t "~A~%>> " conts)
+                  (funcall (if (eq (read) 'yes)
+                               yes-fn
+                               no-fn))))
+            #'(lambda () conts))))))
+\end{lstlisting}
+  \caption{\label{fig:compilation_with_static_reference}使用静态引用的编译过程}
+\end{figure}
+
+如图~\ref{fig:compilation_with_static_reference} 所示，是新版的程序代码。
+现在，\texttt{*node*} 从哈希表改成了一个列表。像以前一样，所有的节点还是
+用~\texttt{defnode} 定义的，不过定义时并不会生成闭包。在定义好所有的节
+点之后，我们就调用~\texttt{compile-net} 来一次性地编译整个网络。
+这个函数递归地进行处理，一直往下，直至树的叶子节点，在递归过程层层返回
+时，每一步都返回了两个目标函数对应的节点~(或称函数)，而不仅仅是给出它们
+的名字。\footnote{这个版本的程序假定程序中的网络是一种树结构，这个前提
+  对这个应用来说肯定是成立的。} 当最外面的~\texttt{compile-net} 调用返
+回时，它给出的函数将表示一个我们所需的那部分网络。
+\begin{lstlisting}
+> (setq n (compile-net 'people))
+#<Compiled-Function BF3C06>
+> (funcall n)
+Is the person a man?
+>>
+\end{lstlisting}
+注意到，\texttt{compile-net} 进行的编译有两层含义。按照通常编
+译的含义，它把网络的抽象表示翻译成了代码。更进一层，如果~\texttt{compile-net} 
+自身被编译的话，那它就会返回编译后的函数。(见第~\pageref{page:compiled_function} 页)
+\label{page:new-language-compiler}
+
+在编译好网络之后，由~\texttt{defnode} 构造的列表就没用了。
+如果切断列表与程序的联系~(例如将~\texttt{*nodes*} 设为~\texttt{nil})，
+垃圾收集器\index{garbage 垃圾!collection 回收}就会回收它。
+
+\section{展望}
+\label{sec:looking_forward}
+
+有许多涉及网络的程序都能通过把节点编译成闭包的形式来实现。闭包作为数据
+对象，和各种数据结构一样能用来表现事物的属性。这样做需要一些和习惯相
+左的思考方式，但是作为回报的是更为迅速，更为优雅的程序。
+
+宏在相当程度上将有助于我们把闭包用作一种表达方式。``用闭包来表示
+'' 是~``编译'' 的另外一种说法。而且由于宏是在编译时完成它们的工作的，
+因而它们理所应当地就是这种技术的最佳载体。在介绍了宏技术之后，
+第~\ref{chap:parsing_with_atns} 章和第~\ref{chap:prolog} 章里会
+呈上更大规模的程序，这些程序将会使用这里曾用过的方法写成。
+
+%%% Local Variables:
+%%% coding: utf-8
+%%% mode: latex
+%%% TeX-master: "onlisp-cn"
+%%% End:

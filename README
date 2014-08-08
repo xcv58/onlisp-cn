@@ -1,0 +1,18 @@
+PDF building requirements:
+
+* TeXlive 2013
+* XeTeX
+* xeCJK
+* Adobe CJK Fonts
+* Mac OS X Fonts
+
+Linux user need to replace some of the fonts set in onlisp-cn.sty.
+
+PDF build command:
+
+#1 = xelatex onlisp-cn
+#2 = makeindex onlisp-cn
+
+(#1 #1 #2 #1 #1)
+
+(note: xelatex may need to be called multiple times)
